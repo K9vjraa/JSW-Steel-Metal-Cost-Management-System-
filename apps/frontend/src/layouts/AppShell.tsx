@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { NavLink, useLocation } from "react-router-dom";
 import { 
   Bell, 
   Boxes, 
@@ -18,27 +17,21 @@ import {
   Search, 
   ChevronLeft, 
   ChevronRight, 
-  Command, 
-  User, 
-  ArrowRight,
-  ShieldAlert,
-  Inbox
+  User
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Core design system imports
 import { 
   SidebarUserPanel, 
-  Input, 
-  Badge, 
-  Button, 
-  Modal 
+  Button 
 } from "@jsw-mcms/ui";
 
-import { notices as fixtureNotices } from "../data/fixtures";
-import { getOrFixture } from "../services/api";
-import type { Notice } from "../types";
 import { useAuth } from "../store/auth";
+import { CommandPalette } from "../components/CommandPalette";
+import { useNotificationStore } from "../store/notificationStore";
+import { useLiveNotifications } from "../hooks/useLiveNotifications";
+import { ToastContainer } from "../components/ToastContainer";
+import { NotificationPanel } from "../components/NotificationPanel";
 
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: FileBarChart2, roles: ["ADMIN", "EMPLOYEE"] },
@@ -57,6 +50,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
+  const prefetchRoute = (to: string) => {
+    if (to === "/dashboard") import("../pages/Dashboards");
+    else if (to === "/workspace") import("../pages/WorkspacePage");
+    else if (to === "/comparison") import("../pages/ComparisonPage");
+    else if (to === "/masters" || to === "/suppliers" || to === "/users" || to === "/settings" || to === "/reports") {
+      import("../pages/OperationsPages");
+    }
+  };
+
   const handleLogout = () => {
     logout().catch(() => {
       // Swallow logout errors — local state is always cleared
@@ -67,12 +69,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  
-  const [searchQuery, setSearchQuery] = useState("");
-  const [notices, setNotices] = useState<Notice[]>(fixtureNotices);
+
+  // Real-time EventSource Stream & State Store Integration
+  useLiveNotifications();
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
   
   const location = useLocation();
-  const navigate = useNavigate();
 
   // Auto-collapse sidebar on tablet breakpoint (lg but narrower than xl)
   useEffect(() => {
@@ -89,18 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // Notices API background stream simulation
-  useEffect(() => {
-    getOrFixture<{ data: Notice[] }>("/notifications?limit=6", { data: fixtureNotices })
-      .then((result) => setNotices(result.data || []));
-      
-    const interval = setInterval(() => {
-      getOrFixture<{ data: Notice[] }>("/notifications?limit=6", { data: fixtureNotices })
-        .then((result) => setNotices(result.data || []));
-    }, 15000);
-    
-    return () => clearInterval(interval);
-  }, []);
+
 
   // Sync state on route changes
   useEffect(() => {
@@ -167,18 +158,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return nav.filter((item) => actor && (item.roles as readonly string[]).includes(actor.role));
   }, [actor]);
 
-  // Spotlight search query filtering
-  const filteredSearchItems = useMemo(() => {
-    if (!searchQuery.trim()) return visibleNavItems;
-    return visibleNavItems.filter((item) =>
-      item.label.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery, visibleNavItems]);
 
-  const handleNoticeClick = (notice: Notice) => {
-    toast.info(`${notice.title}: ${notice.message}`);
-    setNoticeOpen(false);
-  };
+
+
 
   return (
     <div className="min-h-screen bg-[#f5f8fc] text-[#10233d] flex">
@@ -240,6 +222,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={to}
                 to={to}
                 title={isSidebarCollapsed ? label : undefined}
+                onMouseEnter={() => prefetchRoute(to)}
                 className={`flex h-11 items-center gap-3 rounded-lg transition-all decoration-none overflow-hidden ${
                   isSidebarCollapsed ? "px-0 justify-center" : "px-3.5"
                 } ${
@@ -338,6 +321,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     key={to}
                     to={to}
                     onClick={() => setMobileSidebarOpen(false)}
+                    onMouseEnter={() => prefetchRoute(to)}
                     className={({ isActive }) =>
                       `flex h-11 items-center gap-3 rounded-lg px-3.5 text-xs font-bold transition-all decoration-none ${
                         isActive 
@@ -446,78 +430,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* ── Notifications ── */}
             <div className="relative">
               <button
-                onClick={() => { setNoticeOpen(!noticeOpen); setProfileOpen(false); }}
+                onClick={() => { setNoticeOpen(true); setProfileOpen(false); }}
                 className={`relative border border-[#d6dfeb] rounded-lg p-2 hover:bg-slate-50 cursor-pointer text-slate-600 transition-colors ${
                   noticeOpen ? "bg-slate-100 border-[#0057b8]" : ""
                 }`}
-                aria-label={`Notifications${notices.length > 0 ? `, ${notices.length} unread` : ""}`}
+                aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
                 aria-expanded={noticeOpen}
                 aria-haspopup="true"
               >
                 <Bell className="size-4" />
-                {notices.length > 0 && (
+                {unreadCount > 0 && (
                   <span
                     className="absolute -top-1.5 -right-1.5 rounded-full bg-[#d63031] text-[9px] text-white px-1.5 py-0.5 font-bold shadow-xs"
                     aria-hidden="true"
                   >
-                    {notices.length}
+                    {unreadCount}
                   </span>
                 )}
               </button>
-
-              <AnimatePresence>
-                {noticeOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setNoticeOpen(false)} aria-hidden="true" />
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.97 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute right-0 mt-3 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-[#d6dfeb] bg-white p-3 shadow-xl z-20 text-left"
-                      role="menu"
-                      aria-label="Notifications"
-                    >
-                      <div className="mb-2 pb-2 border-b border-slate-100 flex items-center justify-between">
-                        <strong className="text-xs uppercase font-extrabold text-[#10233d]">
-                          Live Operations Alerts
-                        </strong>
-                        <Badge variant="info">15s Refresh</Badge>
-                      </div>
-
-                      {notices.length === 0 ? (
-                        <div className="py-8 flex flex-col items-center justify-center text-slate-400">
-                          <Inbox className="size-7 text-slate-300 mb-2 animate-bounce" aria-hidden="true" />
-                          <span className="text-[10px] font-bold uppercase tracking-wider">No active alerts</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto scrollbar-thin pr-0.5">
-                          {notices.map((notice) => (
-                            <button
-                              key={notice.id}
-                              onClick={() => handleNoticeClick(notice)}
-                              className="rounded-lg border border-slate-100 p-2 text-left hover:bg-slate-50 transition-colors cursor-pointer w-full"
-                              role="menuitem"
-                            >
-                              <div className="flex justify-between items-start gap-2">
-                                <span className="block text-xs font-black text-slate-800 leading-tight">
-                                  {notice.title}
-                                </span>
-                                {notice.category === "CRITICAL" && (
-                                  <ShieldAlert className="size-3.5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
-                                )}
-                              </div>
-                              <span className="block text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">
-                                {notice.category}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
             </div>
 
             {/* ── Profile menu ── */}
@@ -612,67 +542,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      {/* ───────── 4. GLOBAL SEARCH SPOTLIGHT ───────── */}
-      <Modal
+      {/* ───────── 4. GLOBAL COMMAND PALETTE SEARCH ENGINE ───────── */}
+      <CommandPalette
         isOpen={searchOpen}
-        onClose={() => { setSearchOpen(false); setSearchQuery(""); }}
-        title="Spotlight Module Finder"
-        subtitle="Quickly transition across MCMS calculations and masters"
-      >
-        <div className="flex flex-col gap-4">
-          <Input
-            placeholder="Type search terms (e.g. calculation workspace, reports, suppliers)..."
-            value={searchQuery}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-            leftIcon={<Search className="size-4 text-slate-400" />}
-            autoFocus
-            className="w-full"
-          />
+        onClose={() => setSearchOpen(false)}
+      />
 
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-left block">
-              Workspace Shortcuts
-            </span>
-
-            {filteredSearchItems.length === 0 ? (
-              <div className="py-6 text-center text-slate-400 text-xs">
-                No matching active modules found.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
-                {filteredSearchItems.map((item) => (
-                  <button
-                    key={item.to}
-                    onClick={() => {
-                      navigate(item.to);
-                      setSearchOpen(false);
-                      setSearchQuery("");
-                    }}
-                    className="flex items-center justify-between p-2.5 border border-slate-100 rounded-xl hover:bg-slate-50/80 hover:border-[#0057b8]/30 transition-all text-left cursor-pointer w-full group"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400 p-1.5 bg-slate-100 group-hover:bg-[#e8f0fb] group-hover:text-[#0057b8] rounded-lg transition-colors">
-                        <item.icon className="size-4" aria-hidden="true" />
-                      </span>
-                      <strong className="text-xs font-black text-slate-800">
-                        {item.label}
-                      </strong>
-                    </div>
-                    <span className="text-slate-400 group-hover:text-[#0057b8] flex items-center justify-center transition-colors">
-                      <ArrowRight className="size-3.5" aria-hidden="true" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          <div className="text-[9px] font-semibold text-slate-400 border-t border-slate-100 pt-3 flex items-center gap-1.5 justify-center">
-            <Command className="size-3 text-slate-400" aria-hidden="true" />
-            <span>Use ↑↓ arrows to select and Enter to open. Escape to exit.</span>
-          </div>
-        </div>
-      </Modal>
+      {/* ───────── 5. ENTERPRISE REAL-TIME NOTIFICATION DRAWER & TOAST STACKS ───────── */}
+      <ToastContainer />
+      <NotificationPanel
+        isOpen={noticeOpen}
+        onClose={() => setNoticeOpen(false)}
+      />
     </div>
   );
 }

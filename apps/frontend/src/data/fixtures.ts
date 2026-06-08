@@ -19,18 +19,34 @@ const props = {
     toleranceProperties: { "Thickness": "+/- 0.12 mm", "Flatness": "Standard" },
     bendProperties: { "Minimum radius": "1.8T", "Rating": "Excellent" },
     chemicalComposition: { "C": "0.20%", "Mn": "1.20%", "Cr": "1.00%" }
+  },
+  al6061: {
+    mechanicalProperties: { "UTS": "310 MPa", "Yield strength": "276 MPa", "Elongation": "12%" },
+    toleranceProperties: { "Thickness": "+/- 0.08 mm", "Flatness": "Standard" },
+    bendProperties: { "Minimum radius": "3.0T", "Rating": "Fair" },
+    chemicalComposition: { "Al": "97.0%", "Mg": "1.0%", "Si": "0.6%" }
+  },
+  znGalv: {
+    mechanicalProperties: { "UTS": "140 MPa", "Yield strength": "90 MPa", "Elongation": "35%" },
+    toleranceProperties: { "Thickness": "+/- 0.02 mm", "Flatness": "Flat" },
+    bendProperties: { "Minimum radius": "1.0T", "Rating": "Excellent" },
+    chemicalComposition: { "Zn": "99.9%" }
   }
 };
 
 export const grades: Grade[] = [
   { id: "grade-304", name: "SS304", metalId: "metal-ss", multiplier: "1.02", extraPrice: "0", metal: { name: "Stainless Steel", category: "Ferrous", prices: [] }, ...props.ss304 },
   { id: "grade-316", name: "SS316", metalId: "metal-ss", multiplier: "1.08", extraPrice: "2.5", metal: { name: "Stainless Steel", category: "Ferrous", prices: [] }, ...props.ss316 },
-  { id: "grade-as", name: "Alloy Steel", metalId: "metal-as", multiplier: "1.12", extraPrice: "4", metal: { name: "Alloy Steel", category: "Carbon Steel", prices: [] }, ...props.alloy }
+  { id: "grade-as", name: "Alloy Steel", metalId: "metal-as", multiplier: "1.12", extraPrice: "4", metal: { name: "Alloy Steel", category: "Carbon Steel", prices: [] }, ...props.alloy },
+  { id: "grade-al6061", name: "Al6061", metalId: "metal-al", multiplier: "1.05", extraPrice: "0", metal: { name: "Aluminum", category: "Non-Ferrous", prices: [] }, ...props.al6061 },
+  { id: "grade-zngalv", name: "Zn-Galv", metalId: "metal-zn", multiplier: "1.00", extraPrice: "0", metal: { name: "Zinc", category: "Non-Ferrous", prices: [] }, ...props.znGalv }
 ];
 export const metals: Metal[] = [
   { id: "metal-ss", name: "Stainless Steel", code: "MTL-SS", category: "Ferrous", unit: "kg", prices: [{ id: "p-ss", pricePerUnit: "62.50", source: "Price master", effectiveFrom: day(12) }], grades: grades.slice(0, 2) },
   { id: "metal-as", name: "Alloy Steel", code: "MTL-AS", category: "Alloy", unit: "kg", prices: [{ id: "p-as", pricePerUnit: "72.00", source: "Price master", effectiveFrom: day(12) }], grades: [grades[2]] },
-  { id: "metal-fe", name: "Iron", code: "MTL-FE", category: "Ferrous", unit: "kg", prices: [{ id: "p-fe", pricePerUnit: "80.00", source: "Price master", effectiveFrom: day(12) }], grades: [{ ...grades[2], id: "grade-fe", name: "Fe Feed", metalId: "metal-fe" }] }
+  { id: "metal-fe", name: "Iron", code: "MTL-FE", category: "Ferrous", unit: "kg", prices: [{ id: "p-fe", pricePerUnit: "80.00", source: "Price master", effectiveFrom: day(12) }], grades: [{ ...grades[2], id: "grade-fe", name: "Fe Feed", metalId: "metal-fe" }] },
+  { id: "metal-al", name: "Aluminum", code: "MTL-AL", category: "Non-Ferrous", unit: "kg", prices: [{ id: "p-al", pricePerUnit: "185.00", source: "Price master", effectiveFrom: day(12) }], grades: [grades[3]] },
+  { id: "metal-zn", name: "Zinc", code: "MTL-ZN", category: "Non-Ferrous", unit: "kg", prices: [{ id: "p-zn", pricePerUnit: "240.00", source: "Price master", effectiveFrom: day(12) }], grades: [grades[4]] }
 ];
 export const rawMaterials: RawMaterial[] = [
   { id: "rm-fe", name: "Iron Pellets", code: "RM-FE", prices: [{ id: "r-p-fe", pricePerUnit: "80", source: "Price master", effectiveFrom: day(12) }] },

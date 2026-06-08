@@ -3,13 +3,25 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { Notice } from "@jsw-mcms/types";
 import { notices as fixtureNotices } from "../data/fixtures";
 
+export interface Toast {
+  id: string;
+  title: string;
+  message: string;
+  type: "success" | "warning" | "error" | "info";
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  duration?: number;
+}
+
 export interface NotificationState {
   notices: Notice[];
   unreadCount: number;
+  toasts: Toast[];
   setNotices: (notices: Notice[]) => void;
   addNotice: (notice: Notice) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  addToast: (toast: Omit<Toast, "id">) => string;
+  dismissToast: (id: string) => void;
 }
 
 // ── Persistent Notification Feed Store ──────────────────────────────────────────
@@ -18,6 +30,7 @@ export const useNotificationStore = create<NotificationState>()(
     (set) => ({
       notices: fixtureNotices,
       unreadCount: fixtureNotices.filter((n) => !n.readAt).length,
+      toasts: [],
 
       setNotices: (notices) =>
         set({
@@ -53,7 +66,20 @@ export const useNotificationStore = create<NotificationState>()(
             notices: nextNotices,
             unreadCount: 0
           };
-        })
+        }),
+
+      addToast: (toast) => {
+        const id = Math.random().toString(36).substring(2, 9);
+        set((state) => ({
+          toasts: [...state.toasts, { ...toast, id }]
+        }));
+        return id;
+      },
+
+      dismissToast: (id) =>
+        set((state) => ({
+          toasts: state.toasts.filter((t) => t.id !== id)
+        }))
     }),
     {
       name: "mcms-notification-storage",

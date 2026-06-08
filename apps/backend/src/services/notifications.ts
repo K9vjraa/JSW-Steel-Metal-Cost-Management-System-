@@ -1,17 +1,7 @@
-import { EventEmitter } from "node:events";
-import { prisma } from "../prisma/client.js";
+/**
+ * Backward-compatible re-export of the notification service.
+ * All callers that import `notify` or `notificationBus` from this file
+ * now use the same instance as `services/notification.service.ts`.
+ */
 
-export const notificationBus = new EventEmitter();
-notificationBus.setMaxListeners(100);
-
-export async function notify(input: {
-  userId?: string;
-  title: string;
-  message: string;
-  category: string;
-  priority?: "LOW" | "MEDIUM" | "HIGH";
-}) {
-  const notification = await prisma.notification.create({ data: input });
-  notificationBus.emit("notification", notification);
-  return notification;
-}
+export { notify, notificationBus } from "./notification.service.js";

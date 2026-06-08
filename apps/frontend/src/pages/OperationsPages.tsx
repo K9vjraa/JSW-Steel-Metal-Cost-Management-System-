@@ -19,6 +19,7 @@ import {
   Calendar
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -36,7 +37,12 @@ import {
 } from "@/data/fixtures";
 import { shortDate, inr } from "@/utils";
 import { api, getOrFixture } from "@/services/api";
-import { useAuditLogs, useUsers } from "@/hooks/useQuery";
+import { useUsers } from "@/hooks/useQuery";
+import { EnterpriseDataTable, type EnterpriseColumnDef } from "@/components/EnterpriseDataTable";
+import { useTableQuery } from "@/hooks/useTableQuery";
+import { useAuth, useAuthStore } from "../store/auth";
+import { useUIStore } from "../store/uiStore";
+import { useSettingsStore } from "../store/settingsStore";
 
 // Reusable Page Header
 function PageHead({ title, icon: Icon }: { title: string; icon: typeof LockKeyhole }) {
@@ -48,8 +54,15 @@ function Box({ title, value }: { title: string; value: string }) {
   return <Card><CardContent className="p-4"><p className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">{title}</p><strong className="mt-2 block text-xl">{value}</strong></CardContent></Card>;
 }
 
+type TableApiResponse<T> = {
+  data: T[];
+  pagination?: { page: number; limit: number; total: number; pages: number };
+};
+
 export function MastersPage({ focus = "metals" }: { focus?: "metals" | "suppliers" | "users" | "settings" }) {
   const [query, setQuery] = useState("");
+  const metalTable = useTableQuery({ sortBy: "name", sortDir: "asc" });
+  const gradeTable = useTableQuery({ sortBy: "name", sortDir: "asc" });
   
   // Real-time API States
   const [metals, setMetals] = useState<any[]>([]);
@@ -138,17 +151,92 @@ export function MastersPage({ focus = "metals" }: { focus?: "metals" | "supplier
   }, []);
 
   // Filter lists based on query
-  const filteredMetals = useMemo(() => {
-    return metals.filter(m => `${m.name} ${m.code}`.toLowerCase().includes(query.toLowerCase()));
-  }, [metals, query]);
-
-  const filteredGrades = useMemo(() => {
-    return grades.filter(g => `${g.name} ${g.subGrade || ""}`.toLowerCase().includes(query.toLowerCase()));
-  }, [grades, query]);
-
   const filteredRaw = useMemo(() => {
     return rawMaterials.filter(r => `${r.name} ${r.code}`.toLowerCase().includes(query.toLowerCase()));
   }, [rawMaterials, query]);
+
+  const metalsTableQuery = useQuery({
+    queryKey: ["enterprise-table", "metals", metalTable.queryKey],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get<TableApiResponse<any>>("/metals", { params: metalTable.params });
+        return data;
+      } catch {
+        const fallback = metalsFixture.filter((metal) => `${metal.name} ${metal.code}`.toLowerCase().includes((metalTable.params.search as string | undefined)?.toLowerCase() ?? ""));
+        return { data: fallback, pagination: { page: 1, limit: 25, total: fallback.length, pages: 1 } };
+      }
+    },
+    placeholderData: (previous) => previous
+  });
+
+  const gradesTableQuery = useQuery({
+    queryKey: ["enterprise-table", "grades", gradeTable.queryKey],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get<TableApiResponse<any>>("/grades", { params: gradeTable.params });
+        return data;
+      } catch {
+        const fallback = gradesFixture.filter((grade) => `${grade.name} ${(grade as any).subGrade ?? ""}`.toLowerCase().includes((gradeTable.params.search as string | undefined)?.toLowerCase() ?? ""));
+        return { data: fallback, pagination: { page: 1, limit: 25, total: fallback.length, pages: 1 } };
+      }
+    },
+    placeholderData: (previous) => previous
+  });
+
+  const metalColumns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    { accessorKey: "name", header: "Metal Name", meta: { label: "Metal" }, cell: ({ row }) => <span className="font-bold text-slate-800">{row.original.name}</span> },
+    { accessorKey: "code", header: "ERP Code", meta: { label: "Code", className: "font-mono text-[11px]" } },
+    { accessorKey: "category", header: "Category", meta: { label: "Category" } },
+    { accessorKey: "unit", header: "Unit", enableSorting: false, meta: { label: "Unit" } },
+    {
+      id: "price",
+      header: "Master Price",
+      enableSorting: false,
+      meta: { label: "Price" },
+      cell: ({ row }) => row.original.prices?.[0] ? `${inr(row.original.prices[0].pricePerUnit)} / kg` : "N/A"
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      meta: { label: "Status" },
+      cell: ({ row }) => (
+        <Badge className={row.original.status === "ACTIVE" ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
+          {row.original.status}
+        </Badge>
+      )
+    }
+  ], []);
+
+  const gradeColumns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    { accessorKey: "name", header: "Grade Name", meta: { label: "Grade" }, cell: ({ row }) => <span className="font-bold text-slate-800">{row.original.name}</span> },
+    { accessorKey: "subGrade", header: "Subgrade", meta: { label: "Subgrade" }, cell: ({ row }) => row.original.subGrade || "-" },
+    { id: "metal", header: "Metal Class", enableSorting: false, meta: { label: "Metal" }, cell: ({ row }) => row.original.metal?.name || "Ferrous" },
+    { accessorKey: "multiplier", header: "Multiplier", meta: { label: "Multiplier", className: "font-mono" }, cell: ({ row }) => `${row.original.multiplier}x` },
+    { accessorKey: "extraPrice", header: "Extra Charge", meta: { label: "Extra" }, cell: ({ row }) => inr(row.original.extraPrice) },
+    {
+      id: "chemistry",
+      header: "Chemistry",
+      enableSorting: false,
+      meta: { label: "Chemistry", mobileHidden: true },
+      cell: ({ row }) => row.original.chemicalComposition && typeof row.original.chemicalComposition === "object" ? (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(row.original.chemicalComposition).map(([el, val]) => (
+            <Badge key={el} className="bg-slate-50 text-[10px] py-0">{el}: {val as string}</Badge>
+          ))}
+        </div>
+      ) : "Standard"
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      meta: { label: "Status" },
+      cell: ({ row }) => (
+        <Badge className={row.original.status === "ACTIVE" ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
+          {row.original.status}
+        </Badge>
+      )
+    }
+  ], []);
 
   // Form Submit Handlers
   const handleAddMetal = async (e: React.FormEvent) => {
@@ -395,87 +483,81 @@ export function MastersPage({ focus = "metals" }: { focus?: "metals" | "supplier
           </TabsList>
 
           <TabsContent value="metals" className="mt-2">
-            <Card>
-              <CardContent className="overflow-x-auto p-0">
-                <Table>
-                  <thead>
-                    <tr className="bg-[#f8fafc] border-b">
-                      <TableHead>Metal Name</TableHead>
-                      <TableHead>ERP Code</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Units</TableHead>
-                      <TableHead>Master Price</TableHead>
-                      <TableHead>Status</TableHead>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredMetals.map((m) => (
-                      <tr key={m.id} className="border-b hover:bg-slate-50/50">
-                        <TableCell className="font-semibold text-slate-800">{m.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{m.code}</TableCell>
-                        <TableCell>{m.category}</TableCell>
-                        <TableCell>{m.unit}</TableCell>
-                        <TableCell className="font-medium text-slate-700">
-                          {m.prices && m.prices[0] ? `${inr(m.prices[0].pricePerUnit)} / kg` : "N/A"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={m.status === "ACTIVE" ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
-                            {m.status}
-                          </Badge>
-                        </TableCell>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </CardContent>
-            </Card>
+            <EnterpriseDataTable
+              tableId="metals"
+              data={metalsTableQuery.data?.data ?? []}
+              columns={metalColumns}
+              query={metalTable.query}
+              onQueryChange={metalTable.setQuery}
+              totalRows={metalsTableQuery.data?.pagination?.total ?? 0}
+              getRowId={(row) => row.id}
+              isLoading={metalsTableQuery.isLoading}
+              error={metalsTableQuery.error}
+              searchPlaceholder="Search metal name or ERP code..."
+              exportResource="metals"
+              exportParams={metalTable.params}
+              filters={
+                <>
+                  <select
+                    value={metalTable.query.filters.category ?? ""}
+                    onChange={(event) => metalTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, category: event.target.value || undefined } }))}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  >
+                    <option value="">All Categories</option>
+                    <option value="Ferrous">Ferrous</option>
+                    <option value="Alloy">Alloy</option>
+                    <option value="Non-Ferrous">Non-Ferrous</option>
+                  </select>
+                  <select
+                    value={metalTable.query.filters.status ?? ""}
+                    onChange={(event) => metalTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, status: event.target.value || undefined } }))}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                  </select>
+                </>
+              }
+            />
           </TabsContent>
 
           <TabsContent value="grades" className="mt-2">
-            <Card>
-              <CardContent className="overflow-x-auto p-0">
-                <Table>
-                  <thead>
-                    <tr className="bg-[#f8fafc] border-b">
-                      <TableHead>Grade Name</TableHead>
-                      <TableHead>Subgrade</TableHead>
-                      <TableHead>Metal Class</TableHead>
-                      <TableHead>Multiplier</TableHead>
-                      <TableHead>Extra Charge</TableHead>
-                      <TableHead>Chemistry Profile (Cr / Ni / C)</TableHead>
-                      <TableHead>Mechanical (UTS)</TableHead>
-                      <TableHead>Status</TableHead>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredGrades.map((g) => (
-                      <tr key={g.id} className="border-b hover:bg-slate-50/50 text-sm">
-                        <TableCell className="font-semibold text-slate-800">{g.name}</TableCell>
-                        <TableCell className="font-semibold text-slate-500">{g.subGrade || "-"}</TableCell>
-                        <TableCell>{g.metal?.name || "Ferrous"}</TableCell>
-                        <TableCell className="font-mono">{g.multiplier}x</TableCell>
-                        <TableCell>{inr(g.extraPrice)}</TableCell>
-                        <TableCell className="text-xs">
-                          {g.chemicalComposition && typeof g.chemicalComposition === "object" ? (
-                            <div className="flex gap-2">
-                              {Object.entries(g.chemicalComposition).map(([el, val]) => (
-                                <Badge key={el} className="bg-slate-50 text-[10px] py-0">{el}: {val as string}</Badge>
-                              ))}
-                            </div>
-                          ) : "Standard"}
-                        </TableCell>
-                        <TableCell className="text-xs font-mono">{g.mechanicalProperties?.UTS || g.mechanicalProperties?.uts || "Standard"}</TableCell>
-                        <TableCell>
-                          <Badge className={g.status === "ACTIVE" ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
-                            {g.status}
-                          </Badge>
-                        </TableCell>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </CardContent>
-            </Card>
+            <EnterpriseDataTable
+              tableId="grades"
+              data={gradesTableQuery.data?.data ?? []}
+              columns={gradeColumns}
+              query={gradeTable.query}
+              onQueryChange={gradeTable.setQuery}
+              totalRows={gradesTableQuery.data?.pagination?.total ?? 0}
+              getRowId={(row) => row.id}
+              isLoading={gradesTableQuery.isLoading}
+              error={gradesTableQuery.error}
+              searchPlaceholder="Search grade or subgrade..."
+              exportResource="grades"
+              exportParams={gradeTable.params}
+              filters={
+                <>
+                  <select
+                    value={gradeTable.query.filters.metalId ?? ""}
+                    onChange={(event) => gradeTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, metalId: event.target.value || undefined } }))}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  >
+                    <option value="">All Metals</option>
+                    {metals.map((metal) => <option key={metal.id} value={metal.id}>{metal.name}</option>)}
+                  </select>
+                  <select
+                    value={gradeTable.query.filters.status ?? ""}
+                    onChange={(event) => gradeTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, status: event.target.value || undefined } }))}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                  </select>
+                </>
+              }
+            />
           </TabsContent>
 
           <TabsContent value="raw" className="mt-2">
@@ -901,13 +983,700 @@ function SuppliersPanel() {
   return <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]"><GridTable columns={["Supplier", "Code", "Linked Price Sheet", "Status"]} rows={[{ name: "JSW Approved Supply Desk", source: "SUP-JSW-01", value: "7 price lines", extra: "Active" }, { name: "Tata Alloy Quotes", source: "SUP-TA-04", value: "CSV ready", extra: "Review" }]} /><Card><CardHeader><CardTitle>Supplier Price Sheets</CardTitle></CardHeader><CardContent className="flex flex-col gap-2 text-sm"><p>Contact details and linked metal prices stay separate from current master prices until Admin activates a price row.</p><Button variant="outline"><Download />CSV Import / Export</Button></CardContent></Card></div>;
 }
 function UsersPanel() {
-  return <div className="grid gap-4 xl:grid-cols-[1.3fr_.7fr]"><GridTable columns={["User", "Email", "Role", "Status"]} rows={[{ name: "Admin User", source: "admin@jsw-mcms.local", value: "Admin", extra: "Active" }, { name: "Rahul Sharma", source: "procurement@jsw-mcms.local", value: "Procurement", extra: "Active" }, { name: "Meera Iyer", source: "finance@jsw-mcms.local", value: "Finance", extra: "Active" }, { name: "Neha Verma", source: "production@jsw-mcms.local", value: "Production", extra: "Active" }]} /><Card><CardHeader><CardTitle>Role Access</CardTitle></CardHeader><CardContent className="flex flex-col gap-2">{["Admin: all modules", "Procurement: costing + supplier visibility", "Finance: review + reports + audit", "Production: costing + comparison"].map((line) => <div key={line} className="rounded-md border p-2 text-sm">{line}</div>)}</CardContent></Card></div>;
+  const usersTable = useTableQuery({ sortBy: "createdAt", sortDir: "desc" });
+  const usersQuery = useQuery({
+    queryKey: ["enterprise-table", "users", usersTable.queryKey],
+    queryFn: async () => {
+      const { data } = await api.get<TableApiResponse<any>>("/users", { params: usersTable.params });
+      return data;
+    },
+    placeholderData: (previous) => previous
+  });
+  const userColumns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    { accessorKey: "name", header: "User", meta: { label: "User" }, cell: ({ row }) => <span className="font-bold text-slate-800">{row.original.name}</span> },
+    { accessorKey: "email", header: "Email", meta: { label: "Email", className: "font-mono text-[11px]" } },
+    { accessorKey: "department", header: "Department", meta: { label: "Department" }, cell: ({ row }) => row.original.department || "Operations" },
+    { id: "role", header: "Role", enableSorting: false, meta: { label: "Role" }, cell: ({ row }) => row.original.role?.name || row.original.role || "USER" },
+    {
+      accessorKey: "status",
+      header: "Status",
+      meta: { label: "Status" },
+      cell: ({ row }) => (
+        <Badge className={row.original.status === "ACTIVE" ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
+          {row.original.status}
+        </Badge>
+      )
+    }
+  ], []);
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1.3fr_.7fr]">
+      <EnterpriseDataTable
+        tableId="users"
+        data={usersQuery.data?.data ?? []}
+        columns={userColumns}
+        query={usersTable.query}
+        onQueryChange={usersTable.setQuery}
+        totalRows={usersQuery.data?.pagination?.total ?? 0}
+        getRowId={(row) => row.id}
+        isLoading={usersQuery.isLoading}
+        error={usersQuery.error}
+        searchPlaceholder="Search users, email, or department..."
+        exportResource="users"
+        exportParams={usersTable.params}
+        filters={
+          <select
+            value={usersTable.query.filters.status ?? ""}
+            onChange={(event) => usersTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, status: event.target.value || undefined } }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+          >
+            <option value="">All Statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        }
+      />
+      <Card>
+        <CardHeader><CardTitle>Role Access</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-2">{["Admin: all modules", "Procurement: costing + supplier visibility", "Finance: review + reports + audit", "Production: costing + comparison"].map((line) => <div key={line} className="rounded-md border p-2 text-sm">{line}</div>)}</CardContent>
+      </Card>
+    </div>
+  );
 }
 function SettingsPanel() {
-  return <div className="grid gap-4"><Card><CardHeader><CardTitle>Security Settings</CardTitle></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2"><Box title="JWT Sessions" value="Access + refresh" /><Box title="Password Policy" value="bcrypt + lockout" /><Box title="Helmet" value="Security headers" /><Box title="Rate Limit" value="Login protected" /></CardContent></Card></div>;
+  const { actor } = useAuth();
+  const { erpTheme, setErpTheme } = useUIStore();
+  const settings = useSettingsStore((state) => state.settings);
+  const gstSlabs = useSettingsStore((state) => state.gstSlabs);
+  const fetchSettings = useSettingsStore((state) => state.fetchSettings);
+  const updateBulkSettings = useSettingsStore((state) => state.updateBulkSettings);
+  const createGstSlab = useSettingsStore((state) => state.createGstSlab);
+  const deactivateGstSlab = useSettingsStore((state) => state.deactivateGstSlab);
+  const updateProfile = useSettingsStore((state) => state.updateProfile);
+  const isLoading = useSettingsStore((state) => state.isLoading);
+
+  const isAdmin = actor?.role === "ADMIN";
+
+  // Active sub-tab state
+  const [activeTab, setActiveTab] = useState<"profile" | "gst" | "theme" | "system">("profile");
+
+  // Profile Form States
+  const [profileName, setProfileName] = useState(actor?.name || "");
+  const [profileDept, setProfileDept] = useState(actor?.department || "");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  // GST Slab Creator Form States
+  const [gstName, setGstName] = useState("");
+  const [gstCode, setGstCode] = useState("");
+  const [gstRate, setGstRate] = useState("");
+  const [gstDesc, setGstDesc] = useState("");
+  const [showGstModal, setShowGstModal] = useState(false);
+
+  // System settings maps matching category
+  const [systemFields, setSystemFields] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  useEffect(() => {
+    // Populate form states from preloaded DB settings
+    const fields: Record<string, string> = {};
+    settings.forEach((s) => {
+      fields[s.key] = s.value;
+    });
+    setSystemFields(fields);
+  }, [settings]);
+
+  // Sync profile details if auth actor changes
+  useEffect(() => {
+    if (actor) {
+      setProfileName(actor.name);
+      setProfileDept(actor.department || "");
+    }
+  }, [actor]);
+
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileName) {
+      toast.error("Profile name is required.");
+      return;
+    }
+    if (newPassword && newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    try {
+      const payload: any = { name: profileName, department: profileDept };
+      if (newPassword) payload.password = newPassword;
+      const updatedUser = await updateProfile(payload);
+      useAuthStore.setState({
+        actor: {
+          ...actor!,
+          name: updatedUser.name,
+          department: updatedUser.department
+        }
+      });
+      toast.success("Profile credentials updated successfully.");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update profile.");
+    }
+  };
+
+  const handleSystemSettingsSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+
+    // Validate precision and component count limits locally
+    const maxComp = parseInt(systemFields["max_alloy_components"] || "10");
+    const prec = parseInt(systemFields["calculation_decimal_places"] || "4");
+    const timeout = parseInt(systemFields["session_timeout_minutes"] || "60");
+    const attempts = parseInt(systemFields["max_login_attempts"] || "5");
+
+    if (isNaN(maxComp) || maxComp <= 0 || maxComp > 30) {
+      toast.error("Max alloy components must be between 1 and 30.");
+      return;
+    }
+    if (isNaN(prec) || prec < 0 || prec > 8) {
+      toast.error("Precision decimal places must be between 0 and 8.");
+      return;
+    }
+    if (isNaN(timeout) || timeout < 5 || timeout > 1440) {
+      toast.error("Session timeout must be between 5 and 1440 minutes.");
+      return;
+    }
+    if (isNaN(attempts) || attempts < 3 || attempts > 20) {
+      toast.error("Max login attempts must be between 3 and 20.");
+      return;
+    }
+
+    try {
+      await updateBulkSettings(systemFields);
+      toast.success("System configurations successfully committed to master database.");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save system preferences.");
+    }
+  };
+
+  const handleCreateGstSlab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!gstName || !gstCode || !gstRate) {
+      toast.error("Please fill in all mandatory slab fields.");
+      return;
+    }
+    const rateVal = parseFloat(gstRate);
+    if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) {
+      toast.error("GST Rate must be a percentage between 0 and 100.");
+      return;
+    }
+
+    try {
+      await createGstSlab({
+        name: gstName,
+        code: gstCode.toUpperCase(),
+        rate: rateVal,
+        description: gstDesc,
+        active: true
+      });
+      toast.success(`GST Slab ${gstCode} registered successfully.`);
+      setShowGstModal(false);
+      setGstName("");
+      setGstCode("");
+      setGstRate("");
+      setGstDesc("");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create GST Slab.");
+    }
+  };
+
+  const handleDeactivateSlab = async (id: string, code: string) => {
+    if (!window.confirm(`Are you sure you want to deactivate GST Slab ${code}?`)) return;
+    try {
+      await deactivateGstSlab(id);
+      toast.success(`GST Slab ${code} has been deactivated.`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to deactivate GST Slab.");
+    }
+  };
+
+  const handleResetSystemSettings = () => {
+    if (!window.confirm("Reset all settings to default values?")) return;
+    const defaults: Record<string, string> = {
+      default_gst_rate: "18",
+      price_validity_days: "30",
+      currency: "INR",
+      weight_unit: "kg",
+      max_alloy_components: "10",
+      calculation_decimal_places: "4",
+      session_timeout_minutes: "60",
+      max_login_attempts: "5"
+    };
+    setSystemFields(defaults);
+    toast.info("Form reset to system defaults. Click Save to commit changes.");
+  };
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[0.25fr_1fr] text-left">
+      {/* Side Tabs Selector */}
+      <Card className="border-slate-200 bg-white p-3 flex flex-col gap-1.5 h-fit shadow-xs">
+        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-2 mb-1.5">Settings Module</span>
+        {[
+          { id: "profile" as const, label: "Profile Credentials" },
+          { id: "gst" as const, label: "GST Slabs & Rates" },
+          { id: "theme" as const, label: "Currency & Themes" },
+          { id: "system" as const, label: "System Preferences" }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`w-full py-2.5 px-3.5 text-left text-xs font-bold rounded-xl transition-all ${
+              activeTab === tab.id
+                ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </Card>
+
+      {/* Main Form Tab Panels */}
+      <Card className="border-slate-200 bg-white p-6 shadow-xs min-h-[500px]">
+        {/* Tab 1: Profile Credentials */}
+        {activeTab === "profile" && (
+          <form onSubmit={handleProfileSave} className="flex flex-col gap-4 max-w-lg">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-tight">Profile Settings</h3>
+              <p className="text-xs text-slate-400 font-semibold mt-0.5">Update your personal account information and secure credentials.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 mt-2">
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Full Name
+                <Input required value={profileName} onChange={e => setProfileName(e.target.value)} className="h-9.5 text-xs" />
+              </label>
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Department
+                <Input value={profileDept} onChange={e => setProfileDept(e.target.value)} className="h-9.5 text-xs" />
+              </label>
+            </div>
+            <label className="grid gap-1 text-xs font-bold text-slate-500">
+              Email Address (Read-only)
+              <Input disabled value={actor?.email || ""} className="h-9.5 text-xs bg-slate-50 text-slate-400" />
+            </label>
+            <div className="border-t border-slate-100 pt-4 mt-2">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-3">Change Security Password</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-xs font-bold text-slate-500">
+                  New Password
+                  <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Minimum 8 characters" className="h-9.5 text-xs" />
+                </label>
+                <label className="grid gap-1 text-xs font-bold text-slate-500">
+                  Confirm Password
+                  <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm credentials" className="h-9.5 text-xs" />
+                </label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 mt-4">
+              <Button type="submit" disabled={isLoading} className="bg-blue-600 h-9 text-xs">
+                {isLoading ? "Saving changes..." : "Save Credentials"}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* Tab 2: GST Configuration */}
+        {activeTab === "gst" && (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-tight">GST Configuration</h3>
+                <p className="text-xs text-slate-400 font-semibold mt-0.5">Manage tax rate slabs applied to final calculation costing invoice summaries.</p>
+              </div>
+              {isAdmin && (
+                <Button size="sm" onClick={() => setShowGstModal(true)} className="bg-[#087443] hover:bg-[#065a33] text-xs h-8">
+                  <Plus className="mr-1 size-3.5" /> Add New Slab
+                </Button>
+              )}
+            </div>
+
+            {!isAdmin && (
+              <div className="bg-amber-50 text-amber-700 border border-amber-200 rounded-xl p-3.5 text-xs font-semibold flex items-center gap-2 mt-1">
+                <AlertCircle className="size-4.5 shrink-0 text-amber-500" />
+                <span>GST configurations are in read-only mode for non-admin accounts. Contact an administrator to add or modify slabs.</span>
+              </div>
+            )}
+
+            <div className="overflow-x-auto border border-slate-150 rounded-xl mt-2">
+              <Table>
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] uppercase font-bold tracking-wider border-b border-slate-150 text-slate-500">
+                    <TableHead>Slab Name</TableHead>
+                    <TableHead>Tax Code</TableHead>
+                    <TableHead>Slab Rate (%)</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Status</TableHead>
+                    {isAdmin && <TableHead className="w-[100px] text-right">Actions</TableHead>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {gstSlabs.map((slab) => (
+                    <tr key={slab.id} className="text-xs border-b border-slate-100 hover:bg-slate-50/50">
+                      <TableCell className="font-bold text-slate-800">{slab.name}</TableCell>
+                      <TableCell className="font-mono">{slab.code}</TableCell>
+                      <TableCell className="font-bold text-slate-700">{Number(slab.rate)}%</TableCell>
+                      <TableCell className="text-slate-400 truncate max-w-xs">{slab.description || "General industrial tax slab"}</TableCell>
+                      <TableCell>
+                        <Badge className={slab.active ? "border-[#bde4cf] bg-[#e8fbf0] text-[#087443]" : "border-slate-200 bg-slate-100 text-slate-500"}>
+                          {slab.active ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell className="text-right">
+                          {slab.active ? (
+                            <Button size="sm" variant="outline" onClick={() => handleDeactivateSlab(slab.id, slab.code)} className="h-6.5 text-[10px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700">
+                              Deactivate
+                            </Button>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400 italic">Disabled</span>
+                          )}
+                        </TableCell>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Currency & Theme Preferences */}
+        {activeTab === "theme" && (
+          <div className="flex flex-col gap-5 max-w-xl">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-tight">Currency & Theme Preferences</h3>
+              <p className="text-xs text-slate-400 font-semibold mt-0.5">Manage base operational currency and customize user interface density themes.</p>
+            </div>
+
+            {/* Currency settings card */}
+            <Card className="border-slate-150 p-4">
+              <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                <DollarSign className="size-4 text-blue-600" /> Operational Currency
+              </CardTitle>
+              <div className="flex flex-col gap-2.5">
+                <label className="text-xs font-semibold text-slate-500 flex flex-col gap-1.5">
+                  Select Base Currency (Admin only)
+                  <select
+                    disabled={!isAdmin}
+                    value={systemFields["currency"] || "INR"}
+                    onChange={(e) => setSystemFields(curr => ({ ...curr, currency: e.target.value }))}
+                    className="h-9.5 rounded-lg border bg-white px-2.5 text-xs text-slate-700 font-bold max-w-xs disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    <option value="INR">INR (₹) - Indian Rupee (Default)</option>
+                    <option value="USD">USD ($) - United States Dollar</option>
+                    <option value="EUR">EUR (€) - European Euro</option>
+                  </select>
+                </label>
+                {isAdmin && (
+                  <Button onClick={handleSystemSettingsSave} className="bg-blue-600 h-8 max-w-xs text-xs mt-1">
+                    Save Currency Preset
+                  </Button>
+                )}
+              </div>
+            </Card>
+
+            {/* Theme Settings card */}
+            <Card className="border-slate-150 p-4">
+              <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                <Sliders className="size-4 text-green-600" /> Interface Theme Density
+              </CardTitle>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[
+                  { id: "jsw-classic" as const, name: "JSW Classic Blue", desc: "Corporate branding styling colors layout." },
+                  { id: "high-density-gray" as const, name: "High Density Gray", desc: "Ultra-compact spreadsheets style workspace." },
+                  { id: "oracle-dark" as const, name: "Oracle Dark Mode", desc: "Deep charcoal colors layout reducing eye strain." }
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setErpTheme(t.id);
+                      toast.success(`Theme preference changed to ${t.name}`);
+                    }}
+                    className={`flex flex-col gap-1 p-3 text-left border rounded-xl transition-all cursor-pointer ${
+                      erpTheme === t.id
+                        ? "border-blue-600 bg-blue-50/20 shadow-xs ring-1 ring-blue-600"
+                        : "border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-slate-800">{t.name}</span>
+                    <span className="text-[10px] text-slate-400 leading-normal font-medium mt-0.5">{t.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Tab 4: System Preferences & Calculation Defaults */}
+        {activeTab === "system" && (
+          <form onSubmit={handleSystemSettingsSave} className="flex flex-col gap-4 max-w-xl">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-tight">System Preferences & Defaults</h3>
+              <p className="text-xs text-slate-400 font-semibold mt-0.5">Configure platform security parameter limits and default calculation policies.</p>
+            </div>
+
+            {!isAdmin && (
+              <div className="bg-amber-50 text-amber-700 border border-amber-200 rounded-xl p-3.5 text-xs font-semibold flex items-center gap-2 mt-1">
+                <ShieldAlert className="size-4.5 shrink-0 text-amber-500" />
+                <span>You are in view-only mode. System settings can only be altered by authorized system administrators.</span>
+              </div>
+            )}
+
+            {/* Calculations Default parameters */}
+            <div className="grid gap-3.5 sm:grid-cols-2 mt-2">
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Decimal Place Precision
+                <Input
+                  type="number"
+                  disabled={!isAdmin}
+                  value={systemFields["calculation_decimal_places"] || "4"}
+                  onChange={e => setSystemFields(curr => ({ ...curr, calculation_decimal_places: e.target.value }))}
+                  className="h-9.5 text-xs disabled:bg-slate-50"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Max Components Per Alloy
+                <Input
+                  type="number"
+                  disabled={!isAdmin}
+                  value={systemFields["max_alloy_components"] || "10"}
+                  onChange={e => setSystemFields(curr => ({ ...curr, max_alloy_components: e.target.value }))}
+                  className="h-9.5 text-xs disabled:bg-slate-50"
+                />
+              </label>
+            </div>
+
+            {/* Platform security parameters */}
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Session Idle Timeout (Minutes)
+                <Input
+                  type="number"
+                  disabled={!isAdmin}
+                  value={systemFields["session_timeout_minutes"] || "60"}
+                  onChange={e => setSystemFields(curr => ({ ...curr, session_timeout_minutes: e.target.value }))}
+                  className="h-9.5 text-xs disabled:bg-slate-50"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Max Login Failed Lockout Attempts
+                <Input
+                  type="number"
+                  disabled={!isAdmin}
+                  value={systemFields["max_login_attempts"] || "5"}
+                  onChange={e => setSystemFields(curr => ({ ...curr, max_login_attempts: e.target.value }))}
+                  className="h-9.5 text-xs disabled:bg-slate-50"
+                />
+              </label>
+            </div>
+
+            {/* Master pricing settings */}
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Default Weight unit
+                <Input
+                  disabled
+                  value={systemFields["weight_unit"] || "kg"}
+                  className="h-9.5 text-xs bg-slate-50 text-slate-400"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-bold text-slate-500">
+                Price validity duration (Days)
+                <Input
+                  type="number"
+                  disabled={!isAdmin}
+                  value={systemFields["price_validity_days"] || "30"}
+                  onChange={e => setSystemFields(curr => ({ ...curr, price_validity_days: e.target.value }))}
+                  className="h-9.5 text-xs disabled:bg-slate-50"
+                />
+              </label>
+            </div>
+
+            {isAdmin && (
+              <div className="flex justify-between items-center gap-2 border-t border-slate-100 pt-4 mt-4">
+                <Button type="button" variant="outline" onClick={handleResetSystemSettings} className="h-9 text-xs border-slate-200 hover:bg-slate-50 text-slate-600">
+                  Reset Defaults
+                </Button>
+                <Button type="submit" disabled={isLoading} className="bg-blue-600 h-9 text-xs">
+                  {isLoading ? "Saving Settings..." : "Save System Configs"}
+                </Button>
+              </div>
+            )}
+          </form>
+        )}
+      </Card>
+
+      {/* GST slab creation Modal popup */}
+      {showGstModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-md rounded-xl bg-white border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <header className="bg-[#032f67] p-4 text-white">
+              <h3 className="text-sm font-bold uppercase flex items-center gap-2"><Plus className="size-4.5" /> Create GST Tax Slab</h3>
+            </header>
+            <form onSubmit={handleCreateGstSlab} className="p-5 flex flex-col gap-4 text-xs">
+              <label className="grid gap-1 font-bold text-slate-500">Slab Name
+                <Input required value={gstName} onChange={e => setGstName(e.target.value)} placeholder="e.g. Special Recycled Metal slab" className="h-9 text-xs mt-0.5" />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 font-bold text-slate-500">Unique Code
+                  <Input required value={gstCode} onChange={e => setGstCode(e.target.value)} placeholder="e.g. GST-5" className="h-9 text-xs mt-0.5" />
+                </label>
+                <label className="grid gap-1 font-bold text-slate-500">Rate (%)
+                  <Input required type="number" step="0.01" value={gstRate} onChange={e => setGstRate(e.target.value)} placeholder="e.g. 5" className="h-9 text-xs mt-0.5" />
+                </label>
+              </div>
+              <label className="grid gap-1 font-bold text-slate-500">Description (Optional)
+                <Input value={gstDesc} onChange={e => setGstDesc(e.target.value)} placeholder="e.g. Reduced rate applied to raw blends" className="h-9 text-xs mt-0.5" />
+              </label>
+              <div className="flex justify-end gap-2 border-t pt-4 mt-2">
+                <Button type="button" variant="outline" onClick={() => setShowGstModal(false)} className="h-8.5 text-xs">Cancel</Button>
+                <Button type="submit" className="bg-[#032f67] h-8.5 text-xs text-white hover:bg-[#021f45]">Register Slab</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 function GridTable({ rows, columns }: { rows: Array<{ name?: string; source?: string; value?: string; extra?: string }>; columns: string[] }) {
   return <Card><CardContent className="overflow-x-auto p-0"><Table><thead><tr>{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.name}-${index}`}><TableCell className="font-semibold">{row.name}</TableCell><TableCell>{row.source}</TableCell><TableCell>{row.value}</TableCell><TableCell>{row.extra}</TableCell></tr>)}</tbody></Table></CardContent></Card>;
+}
+
+function CalculationsEnterpriseTable() {
+  const tableQuery = useTableQuery({ sortBy: "updatedAt", sortDir: "desc" });
+  const calculationsQuery = useQuery({
+    queryKey: ["enterprise-table", "calculations", tableQuery.queryKey],
+    queryFn: async () => {
+      const { data } = await api.get<TableApiResponse<any>>("/calculations", { params: tableQuery.params });
+      return data;
+    },
+    placeholderData: (previous) => previous
+  });
+  const columns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    { accessorKey: "batchId", header: "Batch ID", meta: { label: "Batch", className: "font-mono text-[11px]" } },
+    { accessorKey: "name", header: "Calculation Run", meta: { label: "Run" }, cell: ({ row }) => <span className="font-bold text-slate-800">{row.original.name}</span> },
+    { accessorKey: "mode", header: "Mode", meta: { label: "Mode" }, cell: ({ row }) => String(row.original.mode).toUpperCase() },
+    { accessorKey: "totalQuantity", header: "Volume", meta: { label: "Volume" }, cell: ({ row }) => `${Number(row.original.totalQuantity).toLocaleString("en-IN")} kg` },
+    { accessorKey: "finalCost", header: "Final Cost", meta: { label: "Final Cost" }, cell: ({ row }) => <span className="font-black text-[#0057b8]">{inr(row.original.finalCost)}</span> },
+    {
+      accessorKey: "status",
+      header: "Status",
+      meta: { label: "Status" },
+      cell: ({ row }) => (
+        <Badge className={row.original.status === "COMPLETED" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}>
+          {row.original.status}
+        </Badge>
+      )
+    },
+    { accessorKey: "updatedAt", header: "Updated", meta: { label: "Updated", mobileHidden: true }, cell: ({ row }) => shortDate(row.original.updatedAt) }
+  ], []);
+
+  return (
+    <EnterpriseDataTable
+      tableId="calculations"
+      data={calculationsQuery.data?.data ?? []}
+      columns={columns}
+      query={tableQuery.query}
+      onQueryChange={tableQuery.setQuery}
+      totalRows={calculationsQuery.data?.pagination?.total ?? 0}
+      getRowId={(row) => row.id}
+      isLoading={calculationsQuery.isLoading}
+      error={calculationsQuery.error}
+      searchPlaceholder="Search batch or calculation name..."
+      exportResource="calculations"
+      exportParams={tableQuery.params}
+      filters={
+        <>
+          <select
+            value={tableQuery.query.filters.status ?? ""}
+            onChange={(event) => tableQuery.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, status: event.target.value || undefined } }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+          >
+            <option value="">All Statuses</option>
+            <option value="DRAFT">Draft</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+          <select
+            value={tableQuery.query.filters.mode ?? ""}
+            onChange={(event) => tableQuery.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, mode: event.target.value || undefined } }))}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+          >
+            <option value="">All Modes</option>
+            <option value="metal">Metal</option>
+            <option value="alloy">Alloy</option>
+            <option value="raw-material">Raw Material</option>
+          </select>
+        </>
+      }
+    />
+  );
+}
+
+function SavedReportsEnterpriseTable() {
+  const tableQuery = useTableQuery({ sortBy: "createdAt", sortDir: "desc" });
+  const reportsQuery = useQuery({
+    queryKey: ["enterprise-table", "reports", tableQuery.queryKey],
+    queryFn: async () => {
+      const { data } = await api.get<TableApiResponse<any>>("/reports", { params: tableQuery.params });
+      return data;
+    },
+    placeholderData: (previous) => previous
+  });
+  const columns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    { accessorKey: "name", header: "Report Name", meta: { label: "Report" }, cell: ({ row }) => <span className="font-bold text-slate-800">{row.original.name}</span> },
+    { accessorKey: "type", header: "Type", meta: { label: "Type" }, cell: ({ row }) => String(row.original.type).replace("-", " ").toUpperCase() },
+    { id: "generatedBy", header: "Generated By", enableSorting: false, meta: { label: "Owner" }, cell: ({ row }) => row.original.generatedBy?.name ?? "System" },
+    { accessorKey: "createdAt", header: "Created", meta: { label: "Created" }, cell: ({ row }) => shortDate(row.original.createdAt) }
+  ], []);
+
+  return (
+    <EnterpriseDataTable
+      tableId="reports"
+      data={reportsQuery.data?.data ?? []}
+      columns={columns}
+      query={tableQuery.query}
+      onQueryChange={tableQuery.setQuery}
+      totalRows={reportsQuery.data?.pagination?.total ?? 0}
+      getRowId={(row) => row.id}
+      isLoading={reportsQuery.isLoading}
+      error={reportsQuery.error}
+      searchPlaceholder="Search saved reports..."
+      exportResource="reports"
+      exportParams={tableQuery.params}
+      filters={
+        <select
+          value={tableQuery.query.filters.type ?? ""}
+          onChange={(event) => tableQuery.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, type: event.target.value || undefined } }))}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+        >
+          <option value="">All Report Types</option>
+          <option value="cost-summary">Cost Summary</option>
+          <option value="trend">Trend</option>
+          <option value="comparison">Comparison</option>
+          <option value="audit">Audit</option>
+          <option value="custom">Custom</option>
+        </select>
+      }
+    />
+  );
 }
 
 interface CalculationReportRow {
@@ -1191,6 +1960,8 @@ export function ReportsPage() {
     toast.success("CSV report downloaded successfully!");
   };
 
+  const showServerCalculationTable = reportType === "calculations";
+
   return (
     <div className="flex flex-col gap-5 text-left">
       <PageHead title="Reporting & Analytics" icon={FileBarChart2} />
@@ -1339,20 +2110,15 @@ export function ReportsPage() {
           </div>
 
           {/* Unified Enterprise Table Layout */}
+          {showServerCalculationTable ? (
+            <CalculationsEnterpriseTable />
+          ) : (
+            <>
           <div className="overflow-x-auto border border-slate-150 rounded-xl">
             <Table>
               <thead>
                 <tr className="bg-slate-50 text-[10px] uppercase font-bold tracking-wider border-b border-slate-150 text-slate-500">
-                  {reportType === "calculations" ? (
-                    <>
-                      <TableHead className="w-[120px] font-bold text-left">Batch ID</TableHead>
-                      <TableHead className="font-bold text-left">Calculation Run</TableHead>
-                      <TableHead className="w-[100px] font-bold text-left">Pivot Mode</TableHead>
-                      <TableHead className="w-[120px] font-bold text-left">Volume</TableHead>
-                      <TableHead className="w-[150px] font-bold text-left">Est Value (INR)</TableHead>
-                      <TableHead className="w-[100px] font-bold text-left">Status</TableHead>
-                    </>
-                  ) : reportType === "daily" ? (
+                  {reportType === "daily" ? (
                     <>
                       <TableHead className="font-bold text-left">Date</TableHead>
                       <TableHead className="font-bold text-left">Runs Recorded</TableHead>
@@ -1398,31 +2164,7 @@ export function ReportsPage() {
                       key={idx}
                       className="text-xs hover:bg-slate-50 transition-colors border-b border-slate-100"
                     >
-                      {reportType === "calculations" ? (
-                        (() => {
-                          const r = row as unknown as CalculationReportRow;
-                          return (
-                            <>
-                              <TableCell className="font-bold text-slate-700">{r.batchId}</TableCell>
-                              <TableCell className="font-extrabold text-slate-800">{r.name}</TableCell>
-                              <TableCell className="font-bold text-slate-500 uppercase">{r.mode}</TableCell>
-                              <TableCell className="font-bold text-slate-600">{r.totalQuantity} kg</TableCell>
-                              <TableCell className="font-black text-blue-600">{inr(r.finalCost)}</TableCell>
-                              <TableCell>
-                                <Badge
-                                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                    r.status === "COMPLETED"
-                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                      : "bg-amber-50 text-amber-700 border-amber-200"
-                                  }`}
-                                >
-                                  {r.status}
-                                </Badge>
-                              </TableCell>
-                            </>
-                          );
-                        })()
-                      ) : reportType === "daily" ? (
+                      {reportType === "daily" ? (
                         (() => {
                           const r = row as unknown as DailyReportRow;
                           return (
@@ -1507,42 +2249,31 @@ export function ReportsPage() {
               </div>
             </div>
           )}
+            </>
+          )}
         </Card>
       </div>
+
+      <SavedReportsEnterpriseTable />
     </div>
   );
 }
 
 export function AuditPage() {
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [action, setAction] = useState("");
-  const [entity, setEntity] = useState("");
-  const [userId, setUserId] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const auditTable = useTableQuery({ sortBy: "createdAt", sortDir: "desc" });
   const [selectedLog, setSelectedLog] = useState<any>(null);
 
-  // 1. Fetch Audit Logs with filter parameters
-  const { data: auditData, isLoading, refetch } = useAuditLogs(page, 10, {
-    search: search.trim() || undefined,
-    action: action || undefined,
-    entity: entity || undefined,
-    userId: userId || undefined,
-    startDate: startDate || undefined,
-    endDate: endDate || undefined
+  const auditQuery = useQuery({
+    queryKey: ["enterprise-table", "audit-logs", auditTable.queryKey],
+    queryFn: async () => {
+      const { data } = await api.get<TableApiResponse<any>>("/audit-logs", { params: auditTable.params });
+      return data;
+    },
+    placeholderData: (previous) => previous
   });
 
-  // 2. Fetch Users to populate operators select list
   const { data: usersData } = useUsers();
   const operators = (usersData?.data || []) as any[];
-
-  const auditLogsList = (auditData?.data || []) as any[];
-  const pagination = auditData?.pagination as { page: number; limit: number; total: number; pages: number } | undefined;
-  const totalPages = pagination?.pages || 1;
-
-  // Handle resetting pagination when filters pivot
-  const resetPage = () => setPage(1);
 
   // Common Action Badges Styling
   const getActionBadge = (act: string) => {
@@ -1568,13 +2299,33 @@ export function AuditPage() {
     return <Badge className="bg-slate-100 text-slate-800 uppercase text-[10px] font-bold">{act}</Badge>;
   };
 
+  const auditColumns = useMemo<EnterpriseColumnDef<any>[]>(() => [
+    {
+      id: "user",
+      header: "Operator User",
+      enableSorting: false,
+      meta: { label: "Operator" },
+      cell: ({ row }) => row.original.user ? (
+        <div>
+          <p className="font-bold text-slate-800">{row.original.user.name}</p>
+          <p className="text-[10px] text-slate-400 font-medium">{row.original.user.email}</p>
+        </div>
+      ) : <span className="text-slate-400 italic">System Auto</span>
+    },
+    { accessorKey: "action", header: "Action Trigger", meta: { label: "Action" }, cell: ({ row }) => getActionBadge(row.original.action) },
+    { accessorKey: "entity", header: "Target Entity", meta: { label: "Entity" }, cell: ({ row }) => <span className="font-semibold uppercase text-slate-500">{row.original.entity}</span> },
+    { accessorKey: "entityId", header: "Entity ID / Key", enableSorting: false, meta: { label: "Entity ID", className: "font-mono text-[11px]" }, cell: ({ row }) => row.original.entityId || "N/A" },
+    { accessorKey: "ipAddress", header: "Client IP", meta: { label: "IP", className: "font-mono" }, cell: ({ row }) => row.original.ipAddress || "Internal" },
+    { accessorKey: "createdAt", header: "Timestamp", meta: { label: "Timestamp" }, cell: ({ row }) => new Date(row.original.createdAt).toLocaleString("en-IN", { hour12: true }) }
+  ], []);
+
   return (
     <div className="flex flex-col gap-5 text-left">
       <PageHead title="Enterprise Security Audit Logs" icon={ShieldAlert} />
 
       {/* KPI statistics cards block */}
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-        <Box title="Total Audits Logged" value={pagination ? `${pagination.total} Records` : "Loading..."} />
+        <Box title="Total Audits Logged" value={auditQuery.data?.pagination ? `${auditQuery.data.pagination.total} Records` : "Loading..."} />
         <Box title="Active Operators" value={`${operators.length || 4} Profiles`} />
         <Box title="System Status" value="100% Audited" />
         <Box title="Mutations Logged" value="Auto & Manual" />
@@ -1589,206 +2340,79 @@ export function AuditPage() {
                 Real-time transaction tracking, user access audits, and metadata capture.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8.5 text-xs font-bold border-slate-200 hover:bg-slate-50 text-slate-700">
+            <Button variant="outline" size="sm" onClick={() => auditQuery.refetch()} className="h-8.5 text-xs font-bold border-slate-200 hover:bg-slate-50 text-slate-700">
               <RefreshCw className="mr-1 size-3.5" /> Reload Stream
             </Button>
           </div>
 
-          {/* Search, Date, Filters Block */}
-          <div className="grid gap-3 md:grid-cols-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            {/* Search */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Search className="h-3 w-3" /> Full Text Search
-              </label>
-              <Input
-                type="text"
-                placeholder="Search action, IP, entity ID..."
-                value={search}
-                onChange={e => { setSearch(e.target.value); resetPage(); }}
-                className="h-9 text-xs bg-white border border-slate-200 rounded-lg"
-              />
-            </div>
-
-            {/* Operator Filter */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Operator User</label>
-              <select
-                className="h-9 rounded-lg border bg-white px-2.5 text-xs text-slate-700"
-                value={userId}
-                onChange={e => { setUserId(e.target.value); resetPage(); }}
-              >
-                <option value="">All Operators</option>
-                {operators.map((op: any) => (
-                  <option key={op.id} value={op.id}>{op.name} ({op.email})</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Action Filter */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Action Class</label>
-              <select
-                className="h-9 rounded-lg border bg-white px-2.5 text-xs text-slate-700"
-                value={action}
-                onChange={e => { setAction(e.target.value); resetPage(); }}
-              >
-                <option value="">All Actions</option>
-                <option value="LOGIN">LOGIN</option>
-                <option value="LOGIN_FAILED">LOGIN_FAILED</option>
-                <option value="CREATE_AUTO">CREATE_AUTO</option>
-                <option value="UPDATE_AUTO">UPDATE_AUTO</option>
-                <option value="DEACTIVATE_AUTO">DEACTIVATE_AUTO</option>
-                <option value="PRICE_UPDATE_AUTO">PRICE_UPDATE_AUTO</option>
-                <option value="CREATE">CREATE</option>
-                <option value="UPDATE">UPDATE</option>
-                <option value="DEACTIVATE">DEACTIVATE</option>
-                <option value="PRICE_UPDATE">PRICE_UPDATE</option>
-                <option value="EXPORT_PDF">EXPORT_PDF</option>
-                <option value="EXPORT_EXCEL">EXPORT_EXCEL</option>
-                <option value="EXPORT_CSV">EXPORT_CSV</option>
-              </select>
-            </div>
-
-            {/* Entity Type Filter */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Entity Scope</label>
-              <select
-                className="h-9 rounded-lg border bg-white px-2.5 text-xs text-slate-700"
-                value={entity}
-                onChange={e => { setEntity(e.target.value); resetPage(); }}
-              >
-                <option value="">All Entities</option>
-                <option value="Authentication">Authentication</option>
-                <option value="Metal">Metal</option>
-                <option value="Grade">Grade</option>
-                <option value="Alloy">Alloy</option>
-                <option value="Calculation">Calculation</option>
-                <option value="PriceList">PriceList</option>
-                <option value="GstSlab">GstSlab</option>
-                <option value="SystemSetting">SystemSetting</option>
-                <option value="User">User</option>
-                <option value="Report">Report</option>
-              </select>
-            </div>
-
-            {/* Timeframe Calendars */}
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Calendar className="h-3 w-3" /> Timeframe Start Date
-              </label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={e => { setStartDate(e.target.value); resetPage(); }}
-                className="h-9 text-xs bg-white border border-slate-200 rounded-lg"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Calendar className="h-3 w-3" /> Timeframe End Date
-              </label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={e => { setEndDate(e.target.value); resetPage(); }}
-                className="h-9 text-xs bg-white border border-slate-200 rounded-lg"
-              />
-            </div>
-          </div>
-
-          {/* Table list */}
-          <div className="overflow-x-auto border border-slate-150 rounded-xl">
-            <Table>
-              <thead>
-                <tr className="bg-slate-50 text-[10px] uppercase font-bold tracking-wider border-b border-slate-150 text-slate-500">
-                  <TableHead className="font-bold text-left">Operator User</TableHead>
-                  <TableHead className="font-bold text-left">Action Trigger</TableHead>
-                  <TableHead className="font-bold text-left">Target Entity</TableHead>
-                  <TableHead className="font-bold text-left">Entity ID / Key</TableHead>
-                  <TableHead className="font-bold text-left">Client IP</TableHead>
-                  <TableHead className="font-bold text-left">Timestamp</TableHead>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400 font-semibold text-xs bg-slate-50/50">
-                      <RefreshCw className="h-7 w-7 text-slate-350 mb-2 mx-auto animate-spin" />
-                      Streaming audit logs from database...
-                    </td>
-                  </tr>
-                ) : auditLogsList.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400 font-semibold text-xs bg-slate-50/50">
-                      <ShieldAlert className="h-8 w-8 text-slate-300 mb-2.5 mx-auto animate-pulse" />
-                      No matching audit log records found inside this timeframe.
-                    </td>
-                  </tr>
-                ) : (
-                  auditLogsList.map((log, idx) => (
-                    <tr
-                      key={log.id || idx}
-                      onClick={() => setSelectedLog(log)}
-                      className="text-xs hover:bg-slate-50 transition-colors border-b border-slate-100 cursor-pointer"
-                    >
-                      <TableCell className="font-bold text-slate-800">
-                        {log.user ? (
-                          <div>
-                            <p className="font-bold text-slate-800">{log.user.name}</p>
-                            <p className="text-[10px] text-slate-400 font-medium">{log.user.email}</p>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 italic">System Auto</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{getActionBadge(log.action)}</TableCell>
-                      <TableCell className="font-semibold text-slate-500 uppercase">{log.entity}</TableCell>
-                      <TableCell className="font-mono text-[11px] text-slate-600 max-w-[120px] truncate" title={log.entityId || "N/A"}>
-                        {log.entityId || "N/A"}
-                      </TableCell>
-                      <TableCell className="font-mono text-slate-500">{log.ipAddress || "Internal"}</TableCell>
-                      <TableCell className="font-medium text-slate-400">
-                        {new Date(log.createdAt).toLocaleString("en-IN", { hour12: true })}
-                      </TableCell>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </Table>
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-4 text-xs font-semibold text-slate-500">
-              <span>
-                Showing page <strong className="text-slate-800 font-extrabold">{page}</strong> of{" "}
-                <strong className="text-slate-800 font-extrabold">{totalPages}</strong> (
-                {pagination?.total || 0} records total)
-              </span>
-              <div className="flex gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
+          <EnterpriseDataTable
+            tableId="audit-logs"
+            data={auditQuery.data?.data ?? []}
+            columns={auditColumns}
+            query={auditTable.query}
+            onQueryChange={auditTable.setQuery}
+            totalRows={auditQuery.data?.pagination?.total ?? 0}
+            getRowId={(row) => row.id}
+            isLoading={auditQuery.isLoading}
+            error={auditQuery.error}
+            searchPlaceholder="Search action, IP, entity ID, or operator..."
+            exportResource="audit-logs"
+            exportParams={auditTable.params}
+            onRowClick={setSelectedLog}
+            filters={
+              <>
+                <select
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  value={auditTable.query.filters.userId ?? ""}
+                  onChange={(event) => auditTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, userId: event.target.value || undefined } }))}
                 >
-                  Prev
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
+                  <option value="">All Operators</option>
+                  {operators.map((op: any) => (
+                    <option key={op.id} value={op.id}>{op.name} ({op.email})</option>
+                  ))}
+                </select>
+                <select
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  value={auditTable.query.filters.action ?? ""}
+                  onChange={(event) => auditTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, action: event.target.value || undefined } }))}
                 >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
+                  <option value="">All Actions</option>
+                  <option value="LOGIN">LOGIN</option>
+                  <option value="LOGIN_FAILED">LOGIN_FAILED</option>
+                  <option value="CREATE">CREATE</option>
+                  <option value="UPDATE">UPDATE</option>
+                  <option value="DEACTIVATE">DEACTIVATE</option>
+                  <option value="PRICE_UPDATE">PRICE_UPDATE</option>
+                  <option value="EXPORT_CSV">EXPORT_CSV</option>
+                </select>
+                <select
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600"
+                  value={auditTable.query.filters.entity ?? ""}
+                  onChange={(event) => auditTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, entity: event.target.value || undefined } }))}
+                >
+                  <option value="">All Entities</option>
+                  <option value="Authentication">Authentication</option>
+                  <option value="Metal">Metal</option>
+                  <option value="Grade">Grade</option>
+                  <option value="Calculation">Calculation</option>
+                  <option value="User">User</option>
+                  <option value="Report">Report</option>
+                </select>
+                <Input
+                  type="date"
+                  value={auditTable.query.filters.from ?? ""}
+                  onChange={(event) => auditTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, from: event.target.value || undefined } }))}
+                  className="h-9 text-xs bg-white border border-slate-200 rounded-lg"
+                />
+                <Input
+                  type="date"
+                  value={auditTable.query.filters.to ?? ""}
+                  onChange={(event) => auditTable.setQuery((current) => ({ ...current, page: 1, filters: { ...current.filters, to: event.target.value || undefined } }))}
+                  className="h-9 text-xs bg-white border border-slate-200 rounded-lg"
+                />
+              </>
+            }
+          />
         </Card>
       </div>
 

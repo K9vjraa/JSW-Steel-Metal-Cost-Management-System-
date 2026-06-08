@@ -4,6 +4,8 @@ import PDFDocument from "pdfkit";
 import { asyncRoute, ApiError } from "../utils/http.js";
 import { prisma } from "../prisma/client.js";
 import { audit } from "../services/audit.js";
+import { allowRoles } from "../middleware/auth.js";
+import { exportLimit, idFilter, tableSort } from "../utils/table.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +41,7 @@ async function calcRows(reportId?: string) {
 
 /** CSV-escape a cell value */
 function csvCell(value: unknown): string {
-  const s = String(value ?? "");
+  const s = safeSpreadsheetText(value);
   return s.includes(",") || s.includes('"') || s.includes("\n")
     ? `"${s.replace(/"/g, '""')}"`
     : s;
@@ -70,6 +72,196 @@ function pdfDivider(doc: InstanceType<typeof PDFDocument>) {
 // ── Router ────────────────────────────────────────────────────────────────────
 
 export const exportRoutes = Router();
+
+const tableSortFields = {
+  metals: ["name", "code", "category", "status", "createdAt"],
+  grades: ["name", "subGrade", "multiplier", "extraPrice", "status", "createdAt"],
+  calculations: ["batchId", "name", "mode", "status", "totalQuantity", "finalCost", "createdAt", "updatedAt"],
+  reports: ["name", "type", "createdAt"],
+  users: ["name", "email", "department", "status", "lastLoginAt", "createdAt"],
+  "audit-logs": ["action", "entity", "ipAddress", "createdAt"]
+} as const;
+
+function safeSpreadsheetText(value: unknown) {
+  const text = String(value ?? "");
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function dateRange(query: Record<string, unknown>) {
+  const from = query.from ?? query.startDate;
+  const to = query.to ?? query.endDate;
+  return from || to
+    ? {
+        ...(from ? { gte: new Date(String(from)) } : {}),
+        ...(to ? { lte: new Date(String(to)) } : {})
+      }
+    : undefined;
+}
+
+async function tableExportRows(resource: keyof typeof tableSortFields, req: any) {
+  const query = req.query as Record<string, string | undefined>;
+  const ids = idFilter(req.query);
+  const take = exportLimit(req.query);
+  const sort = tableSort(req.query, tableSortFields[resource], resource === "calculations" ? "updatedAt" : resource === "reports" || resource === "users" || resource === "audit-logs" ? "createdAt" : "name", resource === "metals" || resource === "grades" ? "asc" : "desc");
+
+  if (resource === "metals") {
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(query.category ? { category: query.category } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.search ? { OR: [{ name: { contains: query.search, mode: "insensitive" as const } }, { code: { contains: query.search, mode: "insensitive" as const } }] } : {})
+    };
+    const rows = await prisma.metal.findMany({ where, include: { prices: { where: { active: true }, orderBy: { effectiveFrom: "desc" }, take: 1 } }, orderBy: sort.orderBy, take });
+    return {
+      entity: "Metal",
+      headers: ["Name", "Code", "Category", "Unit", "Current Price", "Status"],
+      rows: rows.map((row) => [row.name, row.code, row.category, row.unit, row.prices[0]?.pricePerUnit ?? "", row.status])
+    };
+  }
+
+  if (resource === "grades") {
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(query.metalId ? { metalId: query.metalId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.search ? { OR: [{ name: { contains: query.search, mode: "insensitive" as const } }, { subGrade: { contains: query.search, mode: "insensitive" as const } }] } : {})
+    };
+    const rows = await prisma.grade.findMany({ where, include: { metal: true }, orderBy: sort.orderBy, take });
+    return {
+      entity: "Grade",
+      headers: ["Name", "Sub Grade", "Metal", "Multiplier", "Extra Price", "Status"],
+      rows: rows.map((row) => [row.name, row.subGrade ?? "", row.metal.name, row.multiplier, row.extraPrice, row.status])
+    };
+  }
+
+  if (resource === "calculations") {
+    const range = dateRange(req.query);
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(req.actor!.role === "USER" ? { userId: req.actor!.id } : {}),
+      ...(query.status ? { status: query.status as any } : {}),
+      ...(query.mode ? { mode: query.mode } : {}),
+      ...(query.search ? { OR: [{ batchId: { contains: query.search, mode: "insensitive" as const } }, { name: { contains: query.search, mode: "insensitive" as const } }] } : {}),
+      ...(range ? { createdAt: range } : {})
+    };
+    const rows = await prisma.calculation.findMany({ where, include: { user: { select: { name: true } } }, orderBy: sort.orderBy, take });
+    return {
+      entity: "Calculation",
+      headers: ["Batch ID", "Name", "Mode", "Status", "Quantity", "Base Cost", "GST", "Final Cost", "User", "Created At"],
+      rows: rows.map((row) => [row.batchId, row.name, row.mode, row.status, row.totalQuantity, row.baseCost, (row as any).gstAmount ?? "", row.finalCost, row.user.name, row.createdAt.toISOString()])
+    };
+  }
+
+  if (resource === "reports") {
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(query.type ? { type: query.type } : {}),
+      ...(query.search ? { name: { contains: query.search, mode: "insensitive" as const } } : {}),
+      ...(req.actor!.role === "USER" ? { generatedById: req.actor!.id } : {})
+    };
+    const rows = await prisma.report.findMany({ where, include: { generatedBy: { select: { name: true } } }, orderBy: sort.orderBy, take });
+    return {
+      entity: "Report",
+      headers: ["Name", "Type", "Generated By", "Created At"],
+      rows: rows.map((row) => [row.name, row.type, row.generatedBy.name, row.createdAt.toISOString()])
+    };
+  }
+
+  if (resource === "users") {
+    if (req.actor!.role !== "ADMIN") throw new ApiError(403, "Access denied.");
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.search ? { OR: [{ name: { contains: query.search, mode: "insensitive" as const } }, { email: { contains: query.search, mode: "insensitive" as const } }, { department: { contains: query.search, mode: "insensitive" as const } }] } : {})
+    };
+    const rows = await prisma.user.findMany({ where, include: { role: true }, orderBy: sort.orderBy, take });
+    return {
+      entity: "User",
+      headers: ["Name", "Email", "Department", "Role", "Status", "Last Login"],
+      rows: rows.map((row) => [row.name, row.email, row.department ?? "", row.role.name, row.status, row.lastLoginAt?.toISOString() ?? ""])
+    };
+  }
+
+  if (resource === "audit-logs") {
+    if (!["ADMIN", "EMPLOYEE"].includes(req.actor!.role)) throw new ApiError(403, "Access denied.");
+    const range = dateRange(req.query);
+    const where = {
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(query.action ? { action: query.action } : {}),
+      ...(query.entity ? { entity: query.entity } : {}),
+      ...(query.userId ? { userId: query.userId } : {}),
+      ...(range ? { createdAt: range } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { action: { contains: query.search, mode: "insensitive" as const } },
+              { entity: { contains: query.search, mode: "insensitive" as const } },
+              { entityId: { contains: query.search, mode: "insensitive" as const } },
+              { ipAddress: { contains: query.search, mode: "insensitive" as const } },
+              { user: { OR: [{ name: { contains: query.search, mode: "insensitive" as const } }, { email: { contains: query.search, mode: "insensitive" as const } }] } }
+            ]
+          }
+        : {})
+    };
+    const rows = await prisma.auditLog.findMany({ where, include: { user: { select: { name: true, email: true } } }, orderBy: sort.orderBy, take });
+    return {
+      entity: "AuditLog",
+      headers: ["User", "Email", "Action", "Entity", "Entity ID", "IP Address", "Created At"],
+      rows: rows.map((row) => [row.user?.name ?? "System", row.user?.email ?? "", row.action, row.entity, row.entityId ?? "", row.ipAddress ?? "", row.createdAt.toISOString()])
+    };
+  }
+
+  throw new ApiError(404, "Export resource not found.");
+}
+
+exportRoutes.get(
+  "/table/:resource",
+  allowRoles("ADMIN", "EMPLOYEE", "USER"),
+  asyncRoute(async (req, res) => {
+    const resource = String(req.params.resource) as keyof typeof tableSortFields;
+    if (!(resource in tableSortFields)) throw new ApiError(404, "Export resource not found.");
+
+    const format = String(req.query.format ?? "csv").toLowerCase();
+    if (!["csv", "xlsx"].includes(format)) throw new ApiError(400, "Unsupported export format.");
+
+    const exportData = await tableExportRows(resource, req);
+    const filename = `mcms-${resource}-${new Date().toISOString().slice(0, 10)}`;
+
+    if (format === "xlsx") {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "JSW MCMS";
+      workbook.created = new Date();
+      const sheet = workbook.addWorksheet("Export");
+      sheet.addRow(exportData.headers);
+      sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF002B63" } };
+      exportData.rows.forEach((row) => sheet.addRow(row.map(safeSpreadsheetText)));
+      sheet.columns.forEach((column) => {
+        column.width = 18;
+      });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}.xlsx"`);
+      await workbook.xlsx.write(res);
+      res.end();
+    } else {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
+      res.write("\uFEFF");
+      res.write(csvRow(exportData.headers) + "\r\n");
+      exportData.rows.forEach((row) => res.write(csvRow(row) + "\r\n"));
+      res.end();
+    }
+
+    await audit({
+      userId: req.actor!.id,
+      action: format === "xlsx" ? "EXPORT_EXCEL" : "EXPORT_CSV",
+      entity: exportData.entity,
+      entityId: "table-export",
+      details: { resource, rows: exportData.rows.length, filters: req.query },
+      ipAddress: req.ip
+    });
+  })
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CALCULATION PDF — single calculation receipt

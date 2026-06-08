@@ -1,12 +1,6 @@
-import { prisma } from "../prisma/client.js";
+/**
+ * Backward-compatible re-export of the audit repository `createAuditLog`.
+ * All existing imports of `audit` from this file continue to work.
+ */
 
-export async function audit(input: {
-  userId?: string;
-  action: string;
-  entity: string;
-  entityId?: string;
-  ipAddress?: string;
-  details: Record<string, unknown>;
-}) {
-  return prisma.auditLog.create({ data: input as any });
-}
+export { createAuditLog as audit } from "../repositories/audit.repository.js";

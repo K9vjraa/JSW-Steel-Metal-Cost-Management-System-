@@ -46,6 +46,24 @@ const props = {
     toleranceProperties: { thickness: "+/- 0.12 mm", width: "+/- 4 mm", flatness: "Standard IS:1079" },
     bendProperties: { minimumRadius: "2.0T", rating: "Good", springback: "Moderate" },
     chemicalComposition: { carbon: "0.25–0.40%", manganese: "0.60–1.00%", silicon: "0.15–0.35%", phosphorus: "≤0.035%", sulfur: "≤0.035%" }
+  },
+  al6061: {
+    mechanicalProperties: { uts: "310 MPa", yieldStrength: "276 MPa", elongation: "12%", hardness: "HB 95" },
+    toleranceProperties: { thickness: "+/- 0.08 mm", width: "+/- 2 mm", flatness: "Standard" },
+    bendProperties: { minimumRadius: "3.0T", rating: "Fair", springback: "High" },
+    chemicalComposition: { aluminum: "95.8–98.6%", magnesium: "0.8–1.2%", silicon: "0.4–0.8%", iron: "≤0.7%", copper: "0.15–0.40%" }
+  },
+  al5052: {
+    mechanicalProperties: { uts: "228 MPa", yieldStrength: "193 MPa", elongation: "12%", hardness: "HB 60" },
+    toleranceProperties: { thickness: "+/- 0.05 mm", width: "+/- 1.5 mm", flatness: "Tight" },
+    bendProperties: { minimumRadius: "1.5T", rating: "Excellent", springback: "Moderate" },
+    chemicalComposition: { aluminum: "95.7–97.7%", magnesium: "2.2–2.8%", chromium: "0.15–0.35%", iron: "≤0.4%", silicon: "≤0.25%" }
+  },
+  znGalv: {
+    mechanicalProperties: { uts: "140 MPa", yieldStrength: "90 MPa", elongation: "35%", hardness: "HB 45" },
+    toleranceProperties: { thickness: "+/- 0.02 mm", width: "+/- 1 mm", flatness: "Flat" },
+    bendProperties: { minimumRadius: "1.0T", rating: "Excellent", springback: "Very Low" },
+    chemicalComposition: { zinc: "≥99.9%", lead: "≤0.005%", iron: "≤0.003%", cadmium: "≤0.003%" }
   }
 };
 
@@ -84,13 +102,15 @@ async function main() {
   );
 
   // ── Metals ─────────────────────────────────────────────────────────────────
-  const [steel, iron, alloySteel, carbonSteel, copper] = await Promise.all(
+  const [steel, iron, alloySteel, carbonSteel, copper, aluminum, zinc] = await Promise.all(
     [
       ["Stainless Steel", "MTL-SS", "Ferrous", "Austenitic stainless steel family with high corrosion resistance"],
       ["Iron", "MTL-FE", "Ferrous", "Primary iron base metal for structural applications"],
       ["Alloy Steel", "MTL-AS", "Alloy", "Chrome-moly and vanadium alloy steels for high-strength applications"],
       ["Carbon Steel", "MTL-CS", "Ferrous", "Plain carbon steel grades for general structural and automotive use"],
-      ["Copper", "MTL-CU", "Non-Ferrous", "Pure copper for electrical and thermal conductivity applications"]
+      ["Copper", "MTL-CU", "Non-Ferrous", "Pure copper for electrical and thermal conductivity applications"],
+      ["Aluminum", "MTL-AL", "Non-Ferrous", "Lightweight and corrosion-resistant aluminum for structural and cladding sheets"],
+      ["Zinc", "MTL-ZN", "Non-Ferrous", "Zinc metal for galvanization lines and protective coating layers"]
     ].map(([name, code, category, description]) =>
       prisma.metal.upsert({
         where: { code },
@@ -101,7 +121,7 @@ async function main() {
   );
 
   // ── Grades ─────────────────────────────────────────────────────────────────
-  const [ss304, ss316, ss316l, lowAlloy, highAlloy, carbonLow, carbonMedium] = await Promise.all([
+  const [ss304, ss316, ss316l, lowAlloy, highAlloy, carbonLow, carbonMedium, al6061, al5052, znGalv] = await Promise.all([
     prisma.grade.upsert({
       where: { metalId_name_subGrade: { metalId: steel.id, name: "SS304", subGrade: "" } },
       update: { multiplier: "1.02", extraPrice: "0", ...props.ss304 },
@@ -136,6 +156,21 @@ async function main() {
       where: { metalId_name_subGrade: { metalId: carbonSteel.id, name: "Medium Carbon", subGrade: "" } },
       update: { multiplier: "1.06", extraPrice: "1.50", ...props.carbonMedium },
       create: { metalId: carbonSteel.id, name: "Medium Carbon", subGrade: "", multiplier: "1.06", extraPrice: "1.50", ...props.carbonMedium }
+    }),
+    prisma.grade.upsert({
+      where: { metalId_name_subGrade: { metalId: aluminum.id, name: "Al6061", subGrade: "" } },
+      update: { multiplier: "1.05", extraPrice: "0", ...props.al6061 },
+      create: { metalId: aluminum.id, name: "Al6061", subGrade: "", multiplier: "1.05", extraPrice: "0", ...props.al6061 }
+    }),
+    prisma.grade.upsert({
+      where: { metalId_name_subGrade: { metalId: aluminum.id, name: "Al5052", subGrade: "" } },
+      update: { multiplier: "1.02", extraPrice: "0", ...props.al5052 },
+      create: { metalId: aluminum.id, name: "Al5052", subGrade: "", multiplier: "1.02", extraPrice: "0", ...props.al5052 }
+    }),
+    prisma.grade.upsert({
+      where: { metalId_name_subGrade: { metalId: zinc.id, name: "Zn-Galv", subGrade: "" } },
+      update: { multiplier: "1.00", extraPrice: "0", ...props.znGalv },
+      create: { metalId: zinc.id, name: "Zn-Galv", subGrade: "", multiplier: "1.00", extraPrice: "0", ...props.znGalv }
     })
   ]);
 
@@ -183,6 +218,8 @@ async function main() {
     [alloySteel.id, null, "72.00", "JSW-MASTER-AS", "SUP-JSW-01"],
     [carbonSteel.id, null, "48.00", "JSW-MASTER-CS", "SUP-JSW-01"],
     [copper.id, null, "720.00", "LME-SPOT-CU", "SUP-ESSAR-02"],
+    [aluminum.id, null, "185.00", "JSW-MASTER-AL", "SUP-JSW-01"],
+    [zinc.id, null, "240.00", "JSW-MASTER-ZN", "SUP-JSW-01"],
     [null, raw["RM-FE"].id, "80.00", "JSW-RM-FE", "SUP-JSW-01"],
     [null, raw["RM-NI"].id, "850.00", "LME-NI", "SUP-ESSAR-02"],
     [null, raw["RM-CR"].id, "650.00", "LME-CR", "SUP-ESSAR-02"],

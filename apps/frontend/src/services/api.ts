@@ -1,5 +1,7 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
 import type { Actor } from "@/types";
+import { toast } from "sonner";
+import { logger } from "../utils/logger";
 
 // ── Axios instance ────────────────────────────────────────────────────────────
 export const api: AxiosInstance = axios.create({
@@ -81,6 +83,21 @@ api.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+    }
+
+    // Logging all API errors in our global diagnostic buffer
+    logger.error(`API Call failed: [${originalRequest.method?.toUpperCase()}] ${originalRequest.url}`, {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+
+    if (error.response?.status === 403) {
+      toast.error("Security Clearance: Your current role does not have authorization to perform this action.");
+    } else if (!error.response) {
+      toast.error("ERP Network Disconnected: Unable to reach costing server. Retrying connection...");
+    } else if (error.response?.status >= 500) {
+      toast.error("ERP Internal Server Error: JSW Cost Database is temporarily busy. Attempting automatic recovery...");
     }
 
     return Promise.reject(error);

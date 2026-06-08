@@ -1,6 +1,7 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+// compression middleware: install `npm i compression @types/compression` when network allows
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { env } from "./config/env.js";
@@ -18,11 +19,13 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { reportRoutes } from "./routes/reports.js";
 import { userRoutes } from "./routes/users.js";
 import { settingsRoutes } from "./routes/settings.js";
-
+import { searchRoutes } from "./routes/search.js";
+ 
 export function createServer() {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet({ crossOriginResourcePolicy: false }));
+  // app.use(compression()); // re-enable once 'compression' package is installed
   app.use(cors({ origin: env.clientOrigin, credentials: true }));
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
@@ -43,6 +46,7 @@ export function createServer() {
   app.use("/api/notifications", authenticate, auditMiddleware, notificationRoutes);
   app.use("/api/users", authenticate, auditMiddleware, userRoutes);
   app.use("/api/settings", authenticate, auditMiddleware, settingsRoutes);
+  app.use("/api/search", authenticate, auditMiddleware, searchRoutes);
   app.use(errorHandler);
   return app;
 }

@@ -1,18 +1,50 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Button } from "./ui/button";
+import { Page500 } from "../pages/ErrorPages";
+import { logger } from "../utils/logger";
 
-export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null
+  };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
   }
+
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(error, info);
+    // capturing trace inside diagnostic logs ring buffer
+    logger.error(`UI RENDER CRASH: ${error.message}`, {
+      stack: error.stack,
+      componentStack: info.componentStack
+    });
   }
+
+  reset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   render() {
-    if (this.state.failed) {
-      return <main className="grid min-h-screen place-items-center p-6"><div className="rounded-lg border bg-white p-8 text-center"><h1 className="text-xl font-bold">MCMS needs a refresh</h1><p className="mt-2 text-sm text-[var(--muted-foreground)]">A view failed before it could render.</p><Button className="mt-5" onClick={() => location.reload()}>Reload</Button></div></main>;
+    if (this.state.hasError) {
+      return (
+        <Page500 
+          error={this.state.error || new Error("Unknown rendering error occurred")} 
+          resetErrorBoundary={this.reset} 
+        />
+      );
     }
+
     return this.props.children;
   }
 }
+
+export default ErrorBoundary;

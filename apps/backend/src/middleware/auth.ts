@@ -24,7 +24,10 @@ export function verifyRefreshToken(token: string) {
 
 export function authenticate(req: Request, _res: Response, next: NextFunction) {
   const header = req.header("authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+  let token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+  if (!token && req.query.token) {
+    token = String(req.query.token);
+  }
   if (!token) {
     next(new ApiError(401, "Authentication required."));
     return;

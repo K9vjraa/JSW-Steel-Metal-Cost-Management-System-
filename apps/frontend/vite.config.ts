@@ -35,8 +35,8 @@ export default defineConfig(({ mode }) => {
     // ── Production Build ──────────────────────────────────────────────────────
     build: {
       outDir: 'dist',
-      // Only generate sourcemaps for staging/review, not production
-      sourcemap: !isProd,
+      // Explicitly disable sourcemaps in production to prevent native esbuild OOM crashes
+      sourcemap: false,
       // esbuild is the default and works with rolldown (Vite 8)
       minify: isProd ? 'esbuild' : false,
       // Raise chunk size warning limit (export libs are legitimately large)

@@ -10,7 +10,13 @@ import { AuthProvider } from "./store/auth.tsx";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error: any) => {
+        if (error?.response?.status === 401 || error?.response?.status === 403 || error?.response?.status === 404) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30_000),
       staleTime: 30_000,
       refetchOnWindowFocus: false
     }
