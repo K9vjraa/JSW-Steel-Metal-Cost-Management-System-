@@ -455,14 +455,24 @@ The deployment of the MCMS successfully eradicated the financial risks of decent
 
 | Figure No. | Description | Associated Section |
 | :---: | :--- | :--- |
-| **8.1** | Secure Login Gateway | 8.2 (Authentication) |
-| **8.2** | Executive System Dashboard | 8.3 (Dashboard) |
-| **8.3** | Material Composition Builder | 8.5 (Material Master) |
-| **8.4** | Rate Management Temporal UI | 8.6 (Rate Management) |
-| **8.5** | Dynamic Grade Builder | 8.8 (Grade Builder) |
-| **8.6** | Live Calculation Workspace | 8.10 (Workspace) |
-| **8.7** | Visual Comparison Engine | 8.11 (Comparison) |
-| **8.8** | Immutable Audit Logs Viewer | 8.14 (Audit) |
+| **1.1** | MCMS Landing Page | 1.1 (Introduction) |
+| **6.1** | PostgreSQL Database Viewer | 6.1 (Database Overview) |
+| **6.2** | Prisma Studio Interface | 6.1 (Database Overview) |
+| **8.1** | Secure Login Gateway | 8.1 (Authentication Module) |
+| **8.2** | Executive System Dashboard (Costing Admin) | 8.2 (Dashboard) |
+| **8.3** | PDQC System Dashboard | 8.2 (Dashboard) |
+| **8.4** | Material Rate Management | 8.4 (Material Rate Management) |
+| **8.5** | Grade Management Dashboard | 8.5 (Grade Builder) |
+| **8.6** | Dynamic Grade Builder | 8.5 (Grade Builder) |
+| **8.7** | Live Cost Calculation Workspace | 8.7 (Cost Calculation Workspace) |
+| **8.8** | Visual Comparison Engine | 8.8 (Comparison Module) |
+| **8.9** | Reports Dashboard | 8.9 (Reports Module) |
+| **8.10** | Report Export Functionality | 8.10 (Export Module) |
+| **8.11** | User Management Dashboard | 8.11 (User Management) |
+| **8.12** | Immutable Audit Logs Viewer | 8.12 (Audit Logs) |
+| **10.1** | API Automation Testing | 10.4 (API Testing) |
+| **10.2** | Login and RBAC State Testing | 10.5 (UI Testing) |
+| **10.3** | Cost Calculation Engine Testing | 10.9 (Test Cases) |
 
 ---
 
@@ -541,6 +551,14 @@ The percentage of usable final product obtained from a given quantity of input r
 
 
 ## 1.1 Introduction
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/01_Landing_Page.png" alt="MCMS Landing Page" width="800"/>
+  <p><b>Figure 1.1 — MCMS Landing Page</b><br/><i>The entry point of the Metal Cost Management System.</i></p>
+</div>
+<br/>
+
 
 In the modern heavy manufacturing sector, particularly within integrated iron and steel production, cost management is not merely a retroactive accounting exercise; it is a real-time, deterministic parameter that directly governs operational viability, commercial bidding agility, and overall market competitiveness. The global steel industry operates in a hyper-competitive, high-volume environment characterized by thin profit margins. In an integrated steel plant, such as JSW Steel’s 10 MTPA coastal facility in Dolvi, Maharashtra, the financial viability of manufacturing operations is constantly exposed to the extreme price volatility of global raw materials.
 
@@ -1465,6 +1483,21 @@ The technical workflows, data flows, and system components analyzed in this chap
 
 ## 6.1 Database Overview
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/13_PostgreSQL_Database.png" alt="PostgreSQL Database Management" width="800"/>
+  <p><b>Figure 6.1 — PostgreSQL Database Viewer</b><br/><i>Direct interface with the normalized relational database structures.</i></p>
+</div>
+<br/>
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/14_Prisma_Studio.png" alt="Prisma Studio ORM" width="800"/>
+  <p><b>Figure 6.2 — Prisma Studio Interface</b><br/><i>Database interactions managed via the Prisma ORM layer.</i></p>
+</div>
+<br/>
+
+
 The database architecture is the backbone of the Metal Cost Management System (MCMS), responsible for securely storing user profiles, material prices, grade specifications, and historical cost calculations. To achieve high data integrity, transactional reliability, and seamless horizontal scaling, the system leverages **PostgreSQL**, an advanced open-source Object-Relational Database Management System (ORDBMS).
 
 PostgreSQL was selected as the primary data store due to its robust support for ACID transactions, referential integrity, and advanced data types. Specifically, the MCMS relies heavily on arbitrary JSON structures to freeze calculation states (snapshots) and store dynamic metallurgical properties. PostgreSQL's native `JSONB` data type allows the system to combine the structured rigor of a relational database with the schema-less flexibility of a NoSQL document store.
@@ -1748,6 +1781,14 @@ With the system requirements, relational database schemas, and full-stack techno
 
 ## 8.1 Authentication Module
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/02_Login_Page.png" alt="Secure Login Gateway" width="800"/>
+  <p><b>Figure 8.1 — Secure Login Gateway</b><br/><i>The authentication portal enforcing JWT session management and RBAC.</i></p>
+</div>
+<br/>
+
+
 Security and session governance within MCMS are anchored by a hybrid authentication architecture combining JSON Web Tokens (JWT) with a custom Express middleware pipeline.
 
 - **JWT Session Management**: When a user logs into the platform, the backend authenticates credentials against stored cryptographic hashes (using `bcrypt` with a 12-round work factor) and generates a signed RS256 JWT access token.
@@ -1756,6 +1797,21 @@ Security and session governance within MCMS are anchored by a hybrid authenticat
 - **Role-Based Access Control (RBAC)**: Backend endpoint protection is implemented via a higher-order `allowRoles(...roles: string[])` middleware generator. If the authenticated actor's role (e.g., `COSTING_DEPARTMENT` or `PDQC`) is not authorized, the request is immediately aborted with a `403 Forbidden` response.
 
 ## 8.2 Dashboard
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/03_Admin_Dashboard.png" alt="Executive System Dashboard" width="800"/>
+  <p><b>Figure 8.2 — Executive System Dashboard (Costing Admin)</b><br/><i>The central command module providing real-time telemetry and KPI insights.</i></p>
+</div>
+<br/>
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/08_PDQC_Dashboard.png" alt="PDQC System Dashboard" width="800"/>
+  <p><b>Figure 8.3 — PDQC System Dashboard</b><br/><i>The tailored dashboard interface for the Product Development and Quality Control team.</i></p>
+</div>
+<br/>
+
 
 The Dashboard Module serves as the operational command center of MCMS, providing role-tailored real-time telemetry, executive KPI summary cards, statistical analytics charts, and recent activity audit streams.
 
@@ -1773,6 +1829,14 @@ The Material Management module orchestrates the lifecycle operations of the mast
 
 ## 8.4 Material Rate Management
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/04_Admin_Material_Rates.png" alt="Material Rate Management" width="800"/>
+  <p><b>Figure 8.4 — Material Rate Management</b><br/><i>The temporal UI for tracking and updating raw material procurement rates.</i></p>
+</div>
+<br/>
+
+
 Material Rate Management governs procurement market pricing, rate revision lifecycle flows, and historical volatility tracking across all base metals and raw materials.
 
 - **Real-Time Price Updates**: Authorized Costing Specialists submit rate adjustments. The service computes exact price deltas and percentage shifts.
@@ -1780,6 +1844,21 @@ Material Rate Management governs procurement market pricing, rate revision lifec
 - **Transactional Persistence**: Price updates execute an atomic `prisma.$transaction` that updates the current material rate, inserts an immutable historical record into the price history tables, logs the action in the audit trail, and deactivates the previous temporal rate.
 
 ## 8.5 Grade Builder
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/05_Admin_Grade_Management.png" alt="Grade Management Dashboard" width="800"/>
+  <p><b>Figure 8.5 — Grade Management Dashboard</b><br/><i>The overview of available steel grades and their current statuses.</i></p>
+</div>
+<br/>
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/10_Grade_Builder.png" alt="Dynamic Grade Builder" width="800"/>
+  <p><b>Figure 8.6 — Dynamic Grade Builder</b><br/><i>The interactive workspace for constructing multi-component steel formulations.</i></p>
+</div>
+<br/>
+
 
 The Grade Builder workspace allows Quality Control specialists and Costing Admins to construct and validate multi-component steel formulations.
 
@@ -1797,6 +1876,14 @@ The Recipe Builder works in tandem with the Grade Builder to manage the specific
 
 ## 8.7 Cost Calculation Workspace
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/09_Calculation_Workspace.png" alt="Cost Calculation Workspace" width="800"/>
+  <p><b>Figure 8.7 — Live Cost Calculation Workspace</b><br/><i>The central operational module for real-time metallurgical costing execution.</i></p>
+</div>
+<br/>
+
+
 The Cost Calculation Workspace represents the central operational module of MCMS, integrating raw material selection, dynamic recipe configuration, and real-time costing execution.
 
 - **Arbitrary-Precision Arithmetic**: To eliminate floating-point rounding errors during high-tonnage calculations, MCMS enforces strict 18-digit arbitrary precision using the `Decimal.js` library.
@@ -1804,6 +1891,14 @@ The Cost Calculation Workspace represents the central operational module of MCMS
 - **Live Summary Panel**: The client workspace features a persistent right-hand reactive drawer that updates continuously as inputs change, rendering instant cost breakdowns without requiring full-page reloads.
 
 ## 8.8 Comparison Module
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/11_Comparison_Module.png" alt="Comparison Module" width="800"/>
+  <p><b>Figure 8.8 — Visual Comparison Engine</b><br/><i>Multi-grade benchmarking tool for evaluating chemical and financial variances.</i></p>
+</div>
+<br/>
+
 
 The Comparison Module provides industrial engineers with multi-grade benchmarking tools, evaluating physical cost variances and chemical composition deltas against baseline steel grades.
 
@@ -1813,6 +1908,14 @@ The Comparison Module provides industrial engineers with multi-grade benchmarkin
 
 ## 8.9 Reports Module
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/12_Reports.png" alt="Reports Module" width="800"/>
+  <p><b>Figure 8.9 — Reports Dashboard</b><br/><i>Aggregated operational datasets for compliance auditing and financial review.</i></p>
+</div>
+<br/>
+
+
 The Reports Module aggregates operational datasets into executive analytics formats for compliance auditing and financial review.
 
 - **Query Scopes**: Supports strict data filtering by date ranges, user scopes, and material status.
@@ -1820,6 +1923,14 @@ The Reports Module aggregates operational datasets into executive analytics form
 - **Visual Analytics Integration**: Translates raw database telemetry into formatted on-screen tables before dispatching them to the document generation microservices.
 
 ## 8.10 Export Module
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/18_Report_Export.png" alt="Report Export" width="800"/>
+  <p><b>Figure 8.10 — Report Export Functionality</b><br/><i>Translation of application data into printable executive artifacts.</i></p>
+</div>
+<br/>
+
 
 The Export Module is a dedicated microservice facilitating the translation of application data into printable executive artifacts.
 
@@ -1829,12 +1940,28 @@ The Export Module is a dedicated microservice facilitating the translation of ap
 
 ## 8.11 User Management
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/06_Admin_User_Management.png" alt="User Management" width="800"/>
+  <p><b>Figure 8.11 — User Management Dashboard</b><br/><i>Lifecycle administration interface for plant accounts.</i></p>
+</div>
+<br/>
+
+
 User Management provides lifecycle administration for plant accounts, driven by Costing Administrators.
 
 - **Account Provisioning**: Admins provision user accounts by assigning roles (`COSTING_DEPARTMENT` or `PDQC`), plant departments, and email credentials.
 - **Access Revocation**: Supports instant account deactivation and lockout. This disables user access immediately without deleting historical calculation records, preserving relational integrity across the audit trail.
 
 ## 8.12 Audit Logs
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/07_Admin_Audit_Logs.png" alt="Audit Logs" width="800"/>
+  <p><b>Figure 8.12 — Immutable Audit Logs Viewer</b><br/><i>Comprehensive traceability for compliance and industrial auditing.</i></p>
+</div>
+<br/>
+
 
 Compliance and industrial traceability require complete audit telemetry across all data modifications in MCMS.
 
@@ -2080,12 +2207,28 @@ Integration tests verify the combined functionality of different units. For exam
 
 ## 10.4 API Testing
 
+<br/>
+<div align="center">
+  <img src="./images/screenshots/15_API_Testing.png" alt="API Testing Automation" width="800"/>
+  <p><b>Figure 10.1 — API Automation Testing</b><br/><i>Validation of REST API endpoints via comprehensive request testing.</i></p>
+</div>
+<br/>
+
+
 The backend validation matrices assert the stability of network boundaries:
 - API requests lacking a valid `Authorization: Bearer <token>` header immediately throw a `401 Unauthorized` exception.
 - Expired or malformed JWTs throw structured `ApiError` instances.
 - Zod schema validation correctly intercepts malformed payloads and returns `400 Bad Request` with an array of issues before the payload reaches the controller.
 
 ## 10.5 UI Testing
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/16_Testing_Login.png" alt="Login State Testing" width="800"/>
+  <p><b>Figure 10.2 — Login and RBAC State Testing</b><br/><i>Automated verification of the authentication lifecycle and state persistence.</i></p>
+</div>
+<br/>
+
 
 Frontend UI tests reside in `apps/frontend/src/tests/` alongside components (e.g., `WorkspacePage.test.tsx`, `EnterpriseDataTable.test.tsx`). Using `@testing-library/react` and `jsdom`, components are mounted in isolation to verify:
 - DOM rendering and accessibility compliance (ARIA labels).
@@ -2112,6 +2255,14 @@ User Acceptance Testing (UAT) involves stakeholders from the Costing Department 
 - *Calculation Debouncing*: A `500ms` debounce was introduced to the workspace state to resolve minor input lag during real-time updates.
 
 ## 10.9 Test Cases
+
+<br/>
+<div align="center">
+  <img src="./images/screenshots/17_Testing_Calculation.png" alt="Calculation Engine Testing" width="800"/>
+  <p><b>Figure 10.3 — Cost Calculation Engine Testing</b><br/><i>End-to-end testing of dynamic recipe processing and financial formulas.</i></p>
+</div>
+<br/>
+
 
 The execution of Vitest and Playwright suites yields a deterministic test matrix that validates system stability prior to production releases.
 
