@@ -12,11 +12,10 @@ build/
 *.tsbuildinfo
 
 # ==================================================
-# Environment Files (Never Commit)
+# Environment Files
 # ==================================================
-.env
-.env.*
-!.env.example
+# Shared development .env is committed.
+# Ignore only local/production overrides.
 
 # ==================================================
 # Logs
@@ -38,15 +37,12 @@ playwright-report/
 # ==================================================
 # Prisma / Database
 # ==================================================
-server/generated/
-generated/
-server/prisma/dev.db
-apps/backend/prisma/dev.db
-apps/backend/prisma/*.db
-apps/backend/prisma/*.db-journal
-prisma/dev.db
-prisma/*.db
-prisma/*.db-journal
+# Prisma generated client
+node_modules/.prisma/
+
+# Ignore SQLite databases if created accidentally
+*.db
+*.db-journal
 
 # ==================================================
 # Operating System
@@ -58,14 +54,16 @@ Thumbs.db
 # IDE
 # ==================================================
 .idea/
-.vscode/settings.json
 *.suo
 *.user
 *.userosscache
 *.sln.docstates
 
+# Share the entire .vscode folder for collaboration
+# (Do NOT ignore .vscode)
+
 # ==================================================
-# Docker
+# Docker / Runtime
 # ==================================================
 *.pid
 
@@ -78,10 +76,19 @@ tmp/
 *.tmp
 *.bak
 
+# ==================================================
 # Patch & Debug Files
+# ==================================================
 patch_*.txt
 git_log*.txt
 *.orig
+
+# ==================================================
+# Cache
+# ==================================================
+.cache/
+.turbo/
+.eslintcache
 
 # ==================================================
 # Misc
